@@ -1,0 +1,22 @@
+﻿id,name,display_name,category,latitude,longitude,source,notes,is_destination,show_marker
+main_gate,NTHU Main Gate,清大校門口 / NTHU Main Gate,gate,24.796153,120.996694,manual,verified,1,1
+University Green,University Green,大草坪/ Campus Green,intersection,24.795315,120.995581,manual,verified,0,0
+main_library,NTHU Main Library,清大總圖書館 / NTHU Main Library,building,24.795357,120.995079,manual,verified,1,1
+delta_building,Delta Building,台達館 / Delta Building,building,24.795516,120.992255,manual,verified,1,1
+social_sciences,Humanities and Social Sciences Building,人文社會學院 / Humanities and Social Sciences Building,building,24.789793,120.98979,manual,verified,1,1
+engineering_building_i,Engineering Building I,工程一館 / Engineering Building I,building,24.795121,120.996031,manual,verified,1,1
+second_general_building,Second General Building,綜二館 / Second General Building,building,24.794162,120.993555,manual,verified,1,1
+shui_mu_student_center,Shui Mu Student Center,水木生活中心 / Shui Mu Student Center,building,24.792598,120.993716,manual,verified,1,1
+feng_yun_building,Feng Yun Building,風雲樓 / Feng Yun Building,building,24.792253,120.994596,manual,verified,1,1
+sports_field,Sports Field,運動場 / Sports Field,landmark,24.794118,120.990103,manual,verified,1,1
+eecs_building,College of Electrical Engineering and Computer Science,資電館 / College of EECS,building,24.795218,120.992131,manual,verified,1,1
+Technology_Management,TSMC Building,台積館/TSMC Building,building,24.78672,120.988518,manual,verified,1,1
+campus_security_office,駐警隊,駐警隊,building,24.791654,120.99182,manual,manual_added,1,1
+red_bridge_right,學思路小紅橋,學思路小紅橋,road_node,24.795409,120.993118,manual,manual_added,0,0
+red_bridge_left,行勝路小紅橋,行勝路小紅橋,road_node,24.795467,120.99277,manual,manual_added,0,0
+xuesi_load,學思路,學思路,road_node,24.79463,120.995387,manual,manual_added,0,0
+fengyun_load,風雲路,風雲路,road_node,24.792491,120.993995,manual,manual_added,0,0
+food_court,小吃部,小吃部,building,24.793154,120.993327,manual,manual_added,1,1
+guest_house_i,清華會館,清華會館,building,24.797916,120.991005,manual,manual_added,1,1
+engineering_and_system_science,工科館,工科館,building,24.791084,120.991345,manual,manual_added,1,1
+life_sciences_and_medicine,生科一館,生科一館,building,24.789696,120.990307,manual,manual_added,1,1

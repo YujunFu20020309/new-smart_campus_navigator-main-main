@@ -1,0 +1,6 @@
+﻿from_id,to_id,distance_m,stairs,rain_friendly,road_name,description,geometry,routing_source,ignore_osrm,verified,enabled
+red_bridge_right,red_bridge_left,150.299327,0,0,小紅橋,橋,,manual,1,1,1
+red_bridge_left,eecs_building,34.01702422,0,0,小紅橋到資電館,,,manual,1,1,1
+main_gate,University Green,145.9635839,0,1,校門口至大草坪,,,manual,1,1,1
+University Green,main_library,50.88866215,0,1,大草坪智總圖,,,manual,1,1,1
+xuesi_load,fengyun_load,310.6608001249799,0,1,Lakeside,Lakeside,"[[120.995387,24.79463],[120.994644,24.794055],[120.9944,24.793412],[120.994492,24.793312],[120.994052,24.792798],[120.994156,24.79272],[120.993995,24.792491]]",manual,1,1,1

@@ -1,0 +1,387 @@
+"""Configurable forced-route rules that combine OSRM and manual campus edges."""
+
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Callable
+
+import pandas as pd
+
+from .campus_graph import edge_is_bidirectional
+from .geo_utils import estimate_walking_duration_s, haversine_distance_m
+from .routing_osrm import get_osrm_route
+from .utils import ensure_parent_dir, get_place_by_id, parse_coordinate, place_has_coordinates
+
+
+DEFAULT_RULES_PATH = Path(__file__).resolve().parents[1] / "data" / "forced_route_rules.json"
+
+
+def _rules_list(rules: Any) -> list[dict[str, Any]]:
+    if isinstance(rules, dict):
+        rules = rules.get("rules", [])
+    if not isinstance(rules, list):
+        raise ValueError("Forced route rules must be a list or a {'rules': [...]} object.")
+    return [deepcopy(rule) for rule in rules if isinstance(rule, dict)]
+
+
+def load_forced_route_rules(
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> list[dict[str, Any]]:
+    """Load forced route rules from JSON, returning an empty list if absent."""
+    rules_path = Path(path)
+    if not rules_path.exists():
+        print("Forced route rules file not found:", rules_path)
+        return []
+    try:
+        with rules_path.open("r", encoding="utf-8") as file:
+            rules = _rules_list(json.load(file))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"Failed to load forced route rules: {exc}") from exc
+    print("Loaded forced route rules:", rules_path, "count=", len(rules))
+    return rules
+
+
+def save_forced_route_rules(
+    rules: list[dict[str, Any]] | dict[str, Any],
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> list[dict[str, Any]]:
+    """Persist forced route rules as UTF-8 JSON."""
+    normalized = _rules_list(rules)
+    ensure_parent_dir(path)
+    with Path(path).open("w", encoding="utf-8") as file:
+        json.dump({"rules": normalized}, file, ensure_ascii=False, indent=2)
+    return normalized
+
+
+def _validate_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(rule)
+    rule_id = str(normalized.get("id", "")).strip()
+    if not rule_id:
+        raise ValueError("Forced route rule id cannot be blank.")
+    normalized["id"] = rule_id
+    normalized.setdefault("name", rule_id)
+    normalized.setdefault("enabled", True)
+    normalized.setdefault("bidirectional", False)
+    normalized.setdefault("from_place_ids", [])
+    normalized.setdefault("to_place_ids", [])
+    normalized.setdefault("forward_segments", [])
+    if not isinstance(normalized["forward_segments"], list):
+        raise ValueError("forward_segments must be a list.")
+    return normalized
+
+
+def add_forced_route_rule(
+    rule: dict[str, Any],
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> dict[str, Any]:
+    """Add one rule and persist it."""
+    normalized = _validate_rule(rule)
+    rules = load_forced_route_rules(path)
+    if any(existing.get("id") == normalized["id"] for existing in rules):
+        raise ValueError(f"Forced route rule id already exists: {normalized['id']}")
+    rules.append(normalized)
+    save_forced_route_rules(rules, path)
+    return normalized
+
+
+def update_forced_route_rule(
+    rule_id: str,
+    new_rule: dict[str, Any],
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> dict[str, Any]:
+    """Replace one rule by id and persist it."""
+    rules = load_forced_route_rules(path)
+    normalized = _validate_rule({**new_rule, "id": rule_id})
+    for index, rule in enumerate(rules):
+        if rule.get("id") == rule_id:
+            rules[index] = normalized
+            save_forced_route_rules(rules, path)
+            return normalized
+    raise KeyError(f"Forced route rule not found: {rule_id}")
+
+
+def delete_forced_route_rule(
+    rule_id: str,
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> bool:
+    """Delete one rule by id and persist the remaining rules."""
+    rules = load_forced_route_rules(path)
+    remaining = [rule for rule in rules if rule.get("id") != rule_id]
+    if len(remaining) == len(rules):
+        return False
+    save_forced_route_rules(remaining, path)
+    return True
+
+
+def match_forced_route_rule(
+    start_place_id: str,
+    end_place_id: str,
+    rules: list[dict[str, Any]] | dict[str, Any] | None = None,
+    *,
+    path: str | Path = DEFAULT_RULES_PATH,
+) -> dict[str, Any] | None:
+    """Return the first enabled forward/backward rule matching the endpoints."""
+    candidates = load_forced_route_rules(path) if rules is None else _rules_list(rules)
+    for rule in candidates:
+        if rule.get("enabled") is not True:
+            continue
+        from_ids = set(map(str, rule.get("from_place_ids", [])))
+        to_ids = set(map(str, rule.get("to_place_ids", [])))
+        if start_place_id in from_ids and end_place_id in to_ids:
+            print("Matched forced route rule:", rule.get("name"), "forward")
+            return {"rule": deepcopy(rule), "direction": "forward"}
+        if (
+            rule.get("bidirectional") is True
+            and start_place_id in to_ids
+            and end_place_id in from_ids
+        ):
+            print("Matched forced route rule:", rule.get("name"), "backward")
+            return {"rule": deepcopy(rule), "direction": "backward"}
+    return None
+
+
+def merge_geometries(geometry_list: list[list[list[float]]]) -> list[list[float]]:
+    """Merge [lon, lat] geometries without duplicate adjacent endpoints."""
+    merged: list[list[float]] = []
+    for geometry in geometry_list:
+        for point in geometry:
+            normalized = [float(point[0]), float(point[1])]
+            if not merged or merged[-1] != normalized:
+                merged.append(normalized)
+    return merged
+
+
+def _edge_geometry_lon_lat(
+    row: pd.Series,
+    from_place: dict[str, Any],
+    to_place: dict[str, Any],
+) -> list[list[float]]:
+    raw_geometry = str(row.get("geometry", "")).strip()
+    if raw_geometry:
+        try:
+            lon_lat_geometry = json.loads(raw_geometry)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Manual edge geometry is invalid JSON.") from exc
+        if not isinstance(lon_lat_geometry, list):
+            raise ValueError("Manual edge geometry must be a list.")
+        return [[float(point[0]), float(point[1])] for point in lon_lat_geometry]
+
+    if not place_has_coordinates(from_place) or not place_has_coordinates(to_place):
+        raise ValueError("Manual edge endpoints are missing coordinates.")
+    return [
+        [
+            float(parse_coordinate(from_place["longitude"])),
+            float(parse_coordinate(from_place["latitude"])),
+        ],
+        [
+            float(parse_coordinate(to_place["longitude"])),
+            float(parse_coordinate(to_place["latitude"])),
+        ],
+    ]
+
+
+def get_manual_edge_geometry(
+    from_id: str,
+    to_id: str,
+    places_df: pd.DataFrame,
+    edges_df: pd.DataFrame,
+) -> dict[str, Any]:
+    """Return one enabled manual edge as [lon, lat], reversing it when needed."""
+    for reverse in (False, True):
+        expected_from, expected_to = (to_id, from_id) if reverse else (from_id, to_id)
+        matches = edges_df[
+            edges_df["from_id"].astype(str).eq(expected_from)
+            & edges_df["to_id"].astype(str).eq(expected_to)
+        ]
+        for _, row in matches.iterrows():
+            enabled = str(row.get("enabled", "1")).strip().lower()
+            if enabled in {"0", "false", "no", "n"}:
+                continue
+            if reverse and not edge_is_bidirectional(row):
+                continue
+            stored_from = get_place_by_id(places_df, expected_from)
+            stored_to = get_place_by_id(places_df, expected_to)
+            geometry = _edge_geometry_lon_lat(row, stored_from, stored_to)
+            if reverse:
+                geometry.reverse()
+            print("Manual edge reversed:", from_id, "->", to_id, reverse)
+            return {
+                "geometry": geometry,
+                "distance_m": float(row.get("distance_m") or 0),
+                "reversed": reverse,
+                "road_name": row.get("road_name", ""),
+            }
+    raise ValueError(f"Manual edge not found: {from_id} -> {to_id}")
+
+
+def _resolve_segments(
+    matched_rule: dict[str, Any],
+    start_id: str,
+    end_id: str,
+) -> list[dict[str, Any]]:
+    rule = matched_rule["rule"]
+    direction = matched_rule["direction"]
+    segments = deepcopy(rule.get("forward_segments", []))
+    if direction == "forward":
+        symbol_map = {"start": start_id, "end": end_id}
+    else:
+        segments = [
+            {**segment, "from": segment.get("to"), "to": segment.get("from")}
+            for segment in reversed(segments)
+        ]
+        symbol_map = {"start": end_id, "end": start_id}
+
+    resolved: list[dict[str, Any]] = []
+    for segment in segments:
+        resolved.append(
+            {
+                **segment,
+                "from": symbol_map.get(str(segment.get("from")), str(segment.get("from"))),
+                "to": symbol_map.get(str(segment.get("to")), str(segment.get("to"))),
+            }
+        )
+    return resolved
+
+
+def _route_failure(rule: dict[str, Any], direction: str, error: str) -> dict[str, Any]:
+    return {
+        "success": False,
+        "source": "hybrid_forced_route",
+        "rule_id": rule.get("id"),
+        "rule_name": rule.get("name"),
+        "direction": direction,
+        "geometry": [],
+        "folium_coordinates": [],
+        "distance_m": None,
+        "duration_s": None,
+        "path_ids": [],
+        "path_names": [],
+        "edge_segments": [],
+        "error": error,
+        "cache_hit": False,
+    }
+
+
+def route_with_forced_rule(
+    start_place: dict[str, Any] | pd.Series,
+    end_place: dict[str, Any] | pd.Series,
+    matched_rule: dict[str, Any],
+    *,
+    places_df: pd.DataFrame,
+    edges_df: pd.DataFrame,
+    osrm_router: Callable[..., dict[str, Any]] = get_osrm_route,
+    route_cache_path: str | Path = "data/route_cache.json",
+    osrm_profile: str = "foot",
+    allow_network: bool = True,
+    ignore_cache: bool = False,
+) -> dict[str, Any]:
+    """Execute a matched rule by merging OSRM and manual [lon, lat] segments."""
+    rule = matched_rule["rule"]
+    direction = matched_rule["direction"]
+    start_id = str(start_place.get("id"))
+    end_id = str(end_place.get("id"))
+    segments = _resolve_segments(matched_rule, start_id, end_id)
+    geometries: list[list[list[float]]] = []
+    route_segments: list[dict[str, Any]] = []
+    total_distance_m = 0.0
+    cache_hits: list[bool] = []
+    path_ids = [start_id]
+
+    try:
+        for segment in segments:
+            segment_type = str(segment.get("type", "")).strip().lower()
+            from_id = str(segment["from"])
+            to_id = str(segment["to"])
+            print("Using forced route segment:", segment_type, from_id, "->", to_id)
+            from_place = get_place_by_id(places_df, from_id)
+            to_place = get_place_by_id(places_df, to_id)
+
+            if segment_type == "osrm":
+                print("Using OSRM walking segment")
+                if not place_has_coordinates(from_place) or not place_has_coordinates(to_place):
+                    raise ValueError(f"OSRM segment endpoint is missing coordinates: {from_id} -> {to_id}")
+                result = osrm_router(
+                    parse_coordinate(from_place["latitude"]),
+                    parse_coordinate(from_place["longitude"]),
+                    parse_coordinate(to_place["latitude"]),
+                    parse_coordinate(to_place["longitude"]),
+                    profile="foot",
+                    cache_path=route_cache_path,
+                    allow_network=allow_network,
+                    ignore_cache=ignore_cache,
+                )
+                if not result.get("success"):
+                    raise ValueError(
+                        f"OSRM segment failed: {from_id} -> {to_id}: {result.get('error')}"
+                    )
+                geometry = [
+                    [float(point[1]), float(point[0])]
+                    for point in result.get("folium_coordinates", [])
+                ]
+                distance_m = float(result.get("distance_m") or 0)
+                cache_hits.append(bool(result.get("cache_hit")))
+            elif segment_type == "manual":
+                print("Using manual segment")
+                result = get_manual_edge_geometry(from_id, to_id, places_df, edges_df)
+                geometry = result["geometry"]
+                distance_m = float(result["distance_m"])
+                if result.get("reversed"):
+                    print("Using reversed manual segment")
+            elif segment_type == "straight":
+                print("Using straight segment")
+                if not place_has_coordinates(from_place) or not place_has_coordinates(to_place):
+                    raise ValueError(
+                        f"Straight segment endpoint is missing coordinates: {from_id} -> {to_id}"
+                    )
+                from_lat = float(parse_coordinate(from_place["latitude"]))
+                from_lon = float(parse_coordinate(from_place["longitude"]))
+                to_lat = float(parse_coordinate(to_place["latitude"]))
+                to_lon = float(parse_coordinate(to_place["longitude"]))
+                geometry = [[from_lon, from_lat], [to_lon, to_lat]]
+                distance_m = haversine_distance_m(from_lat, from_lon, to_lat, to_lon)
+                result = {}
+            else:
+                raise ValueError(f"Unsupported forced route segment type: {segment_type}")
+
+            if not geometry:
+                raise ValueError(f"Route segment has no geometry: {from_id} -> {to_id}")
+            geometries.append(geometry)
+            total_distance_m += distance_m
+            path_ids.append(to_id)
+            route_segments.append(
+                {
+                    "from_id": from_id,
+                    "to_id": to_id,
+                    "type": segment_type,
+                    "distance_m": distance_m,
+                    "geometry_point_count": len(geometry),
+                    "manual_reversed": bool(result.get("reversed", False)),
+                }
+            )
+    except (KeyError, TypeError, ValueError) as exc:
+        return _route_failure(rule, direction, str(exc))
+
+    geometry = merge_geometries(geometries)
+    print("Merged forced route geometry length:", len(geometry))
+    path_names = [
+        get_place_by_id(places_df, place_id).get("display_name") or place_id
+        for place_id in path_ids
+    ]
+    return {
+        "success": True,
+        "source": "hybrid_forced_route",
+        "rule_id": rule.get("id"),
+        "rule_name": rule.get("name"),
+        "direction": direction,
+        "geometry": geometry,
+        "folium_coordinates": [[point[1], point[0]] for point in geometry],
+        "distance_m": total_distance_m,
+        "duration_s": estimate_walking_duration_s(total_distance_m),
+        "path_ids": path_ids,
+        "path_names": path_names,
+        "edge_segments": route_segments,
+        "error": None,
+        "cache_hit": bool(cache_hits) and all(cache_hits),
+    }

@@ -1,0 +1,68 @@
+{
+  "rules": [
+    {
+      "id": "red_bridge_rule",
+      "name": "小紅橋強制路線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "engineering_building_i",
+        "main_library"
+      ],
+      "to_place_ids": [
+        "delta_building",
+        "eecs_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "red_bridge_right"
+        },
+        {
+          "type": "manual",
+          "from": "red_bridge_right",
+          "to": "red_bridge_left"
+        },
+        {
+          "type": "straight",
+          "from": "red_bridge_left",
+          "to": "end"
+        }
+      ]
+    },
+    {
+      "id": "lakeside_rule",
+      "name": "Lakeside 強制路線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "engineering_building_i",
+        "main_library"
+      ],
+      "to_place_ids": [
+        "shui_mu_student_center",
+        "feng_yun_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "xuesi_load"
+        },
+        {
+          "type": "manual",
+          "from": "xuesi_load",
+          "to": "fengyun_load"
+        },
+        {
+          "type": "straight",
+          "from": "fengyun_load",
+          "to": "end"
+        }
+      ]
+    }
+  ]
+}

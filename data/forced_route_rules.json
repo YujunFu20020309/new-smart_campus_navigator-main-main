@@ -1,0 +1,312 @@
+{
+  "rules": [
+    {
+      "id": "red_bridge_rule",
+      "name": "小紅橋強制路線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "engineering_building_i",
+        "main_library",
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "delta_building",
+        "eecs_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "red_bridge_right"
+        },
+        {
+          "type": "manual",
+          "from": "red_bridge_right",
+          "to": "red_bridge_left"
+        },
+        {
+          "type": "straight",
+          "from": "red_bridge_left",
+          "to": "end"
+        }
+      ]
+    },
+    {
+      "id": "lakeside_rule",
+      "name": "Lakeside 強制路線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "engineering_building_i",
+        "main_library",
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "shui_mu_student_center",
+        "feng_yun_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "xuesi_load"
+        },
+        {
+          "type": "manual",
+          "from": "xuesi_load",
+          "to": "fengyun_load"
+        },
+        {
+          "type": "straight",
+          "from": "fengyun_load",
+          "to": "end"
+        }
+      ]
+    },
+    {
+      "id": "guest_house",
+      "name": "清大會館校內線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "engineering_building_i",
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "guest_house_i"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "engineering_building_i"
+        },
+        {
+          "type": "osrm",
+          "from": "engineering_building_i",
+          "to": "guest_house_i"
+        }
+      ]
+    },
+    {
+      "id": "gongk_building",
+      "name": "工科路線",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "main_library",
+        "engineering_building_i",
+        "delta_building",
+        "shui_mu_student_center",
+        "feng_yun_building",
+        "eecs_building",
+        "guest_house_i",
+        "second_general_building",
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "engineering_and_system_science"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "fong_ling_crossroad"
+        },
+        {
+          "type": "manual",
+          "from": "fong_ling_crossroad",
+          "to": "fongling_road2"
+        },
+        {
+          "type": "straight",
+          "from": "fongling_road2",
+          "to": "fongling_road3"
+        },
+        {
+          "type": "straight",
+          "from": "fongling_road3",
+          "to": "engineering_and_system_science"
+        }
+      ]
+    },
+    {
+      "id": "rain_example_rule",
+      "name": "雨天示範強制路線",
+      "enabled": false,
+      "bidirectional": true,
+      "modes": [
+        "rain_friendly"
+      ],
+      "from_place_ids": [
+        "main_gate"
+      ],
+      "to_place_ids": [
+        "main_library"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "University Green"
+        },
+        {
+          "type": "manual",
+          "from": "University Green",
+          "to": "main_library"
+        }
+      ]
+    },
+    {
+      "id": "lawnroad",
+      "name": "工一_圖書館_跨草皮",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "engineering_building_i"
+      ],
+      "to_place_ids": [
+        "main_library"
+      ],
+      "forward_segments": [
+        {
+          "type": "straight",
+          "from": "engineering_building_i",
+          "to": "University Green"
+        },
+        {
+          "type": "straight",
+          "from": "University Green",
+          "to": "main_library"
+        }
+      ]
+    },
+    {
+      "id": "che_road1",
+      "name": "化工館路",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "che_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "motor_parking_exit",
+          "to": "che_building_beside1"
+        },
+        {
+          "type": "straight",
+          "from": "che_building_beside1",
+          "to": "che_building"
+        }
+      ]
+    },
+    {
+      "id": "rainydayyyy",
+      "name": "雨天規則v1",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "main_gate",
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "food_court"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "che_building_beside1"
+        },
+        {
+          "type": "straight",
+          "from": "che_building_beside1",
+          "to": "che_building"
+        },
+        {
+          "type": "straight",
+          "from": "che_building",
+          "to": "che_building_libary"
+        },
+        {
+          "type": "straight",
+          "from": "che_building_libary",
+          "to": "libary_back"
+        },
+        {
+          "type": "osrm",
+          "from": "libary_back",
+          "to": "nthu_garden_north"
+        },
+        {
+          "type": "straight",
+          "from": "nthu_garden_north",
+          "to": "nthu_garden_south"
+        },
+        {
+          "type": "osrm",
+          "from": "nthu_garden_south",
+          "to": "end"
+        }
+      ],
+      "modes": [
+        "rain_friendly"
+      ]
+    },
+    {
+      "id": "eecs_rule",
+      "name": "資電館路線優化",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "food_court",
+        "fengyun_load",
+        "engineering_and_system_science",
+        "life_sciences_and_medicine",
+        "social_sciences",
+        "second_general_building",
+        "shui_mu_student_center",
+        "feng_yun_building",
+        "sports_field",
+        "Technology_Management",
+        "southedu_building",
+        "nthu_south_gate"
+      ],
+      "to_place_ids": [
+        "eecs_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "nthu_hall_of_fame_1"
+        },
+        {
+          "type": "straight",
+          "from": "nthu_hall_of_fame_1",
+          "to": "physics_building_front"
+        },
+        {
+          "type": "straight",
+          "from": "physics_building_front",
+          "to": "eecs_building_front"
+        },
+        {
+          "type": "straight",
+          "from": "eecs_building_front",
+          "to": "end"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.pytest-cache-writable/
+.pytest-tmp/
+.pytest-cache-*/
+.pytest-tmp-*/
+.tmp/
+*.pyc
+*.pyo
+*.log
+.streamlit/
