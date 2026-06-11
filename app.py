@@ -12,9 +12,7 @@ from streamlit_folium import st_folium
 from src.campus_graph import build_campus_graph, compute_campus_route, load_edges
 from src.data_admin import (
     EDGE_COLUMNS,
-    PENDING_PLACE_CATEGORY_OPTIONS,
     append_edge,
-    append_pending_place,
     append_place,
     sanitize_place_id,
     save_edges,
@@ -55,6 +53,21 @@ from src.route_service import (
     route_failure as _route_failure,
 )
 from src.routing_osrm import get_osrm_route
+from src.ui_forced_routes import (
+    FORCED_RULE_MODE_OPTIONS as _FORCED_RULE_MODE_OPTIONS,
+    _apply_forced_rule_modes as _ui_apply_forced_rule_modes,
+    _forced_rule_modes_label as _ui_forced_rule_modes_label,
+    _forced_rule_modes_selection as _ui_forced_rule_modes_selection,
+    _segments_frame as _ui_segments_frame,
+    _segments_from_editor as _ui_segments_from_editor,
+    render_forced_route_rules_sidebar as _render_forced_route_rules_sidebar,
+)
+from src.ui_pending_places import (
+    PENDING_PLACE_FORM_KEYS as _PENDING_PLACE_FORM_KEYS,
+    _clear_pending_place_form_state as _ui_clear_pending_place_form_state,
+    _last_clicked_location as _ui_last_clicked_location,
+    render_pending_place_review_form as _render_pending_place_review_form,
+)
 from src.utils import (
     format_distance,
     format_duration,
@@ -297,138 +310,23 @@ def data_quality_lists(places_df: pd.DataFrame, labels: dict[str, str]) -> tuple
     return missing_coordinates, out_of_bounds
 
 
-PENDING_PLACE_FORM_KEYS = [
-    "pending_place_id",
-    "pending_place_name",
-    "pending_place_display_name",
-    "pending_place_category",
-    "pending_place_type",
-    "pending_place_is_destination",
-    "pending_place_show_marker",
-    "pending_place_notes",
-    "pending_place_manual_latitude",
-    "pending_place_manual_longitude",
-    "pending_place_use_manual_coordinates",
-]
+PENDING_PLACE_FORM_KEYS = _PENDING_PLACE_FORM_KEYS
+_last_clicked_location = _ui_last_clicked_location
+_clear_pending_place_form_state = _ui_clear_pending_place_form_state
 
 
-def _last_clicked_location(map_data: dict[str, Any] | None) -> dict[str, float] | None:
-    if not isinstance(map_data, dict):
-        return None
-    clicked = map_data.get("last_clicked") or map_data.get("last_object_clicked")
-    if not isinstance(clicked, dict):
-        return None
-    latitude = parse_coordinate(clicked.get("lat") or clicked.get("latitude"))
-    longitude = parse_coordinate(
-        clicked.get("lng") or clicked.get("lon") or clicked.get("longitude")
-    )
-    if latitude is None or longitude is None:
-        return None
-    return {"latitude": latitude, "longitude": longitude}
-
-
-def _clear_pending_place_form_state() -> None:
-    for key in PENDING_PLACE_FORM_KEYS:
-        st.session_state.pop(key, None)
-    st.session_state.pop("pending_clicked_location", None)
+def _on_pending_place_added() -> None:
+    load_places_cached.clear()
+    load_edges_cached.clear()
+    st.session_state.pop("route_state", None)
 
 
 def render_pending_place_review_form(places_df: pd.DataFrame) -> None:
-    """Render the map-click pending-place form without writing places.csv."""
-    success_message = st.session_state.pop("pending_place_success", None)
-    if success_message:
-        st.success(success_message)
-        st.info("這只是 pending 待審核資料，尚未加入正式 places.csv。")
-
-    st.markdown("### 新增地點模式")
-    location = st.session_state.get("pending_clicked_location")
-    if not location:
-        st.info("請先在地圖上點選新增地點的位置。")
-        return
-
-    clicked_latitude = float(location["latitude"])
-    clicked_longitude = float(location["longitude"])
-    st.write(f"latitude：{clicked_latitude:.6f}")
-    st.write(f"longitude：{clicked_longitude:.6f}")
-
-    with st.form("pending_place_review_form"):
-        place_id = st.text_input("id", key="pending_place_id")
-        name = st.text_input("name", key="pending_place_name")
-        display_name = st.text_input("display_name", key="pending_place_display_name")
-        category = st.selectbox(
-            "category",
-            PENDING_PLACE_CATEGORY_OPTIONS,
-            key="pending_place_category",
-        )
-        place_type = st.text_input("type", key="pending_place_type")
-        is_destination = st.checkbox(
-            "is_destination",
-            value=True,
-            key="pending_place_is_destination",
-        )
-        show_marker = st.checkbox(
-            "show_marker",
-            value=True,
-            key="pending_place_show_marker",
-        )
-        st.text_input(
-            "notes",
-            value="pending_review",
-            disabled=True,
-            key="pending_place_notes",
-        )
-        use_manual_coordinates = st.checkbox(
-            "進階手動修正座標",
-            value=False,
-            key="pending_place_use_manual_coordinates",
-        )
-        latitude = clicked_latitude
-        longitude = clicked_longitude
-        if use_manual_coordinates:
-            latitude = st.number_input(
-                "latitude",
-                value=clicked_latitude,
-                format="%.6f",
-                key="pending_place_manual_latitude",
-            )
-            longitude = st.number_input(
-                "longitude",
-                value=clicked_longitude,
-                format="%.6f",
-                key="pending_place_manual_longitude",
-            )
-        else:
-            st.caption("latitude / longitude 會使用剛剛地圖點選的位置。")
-
-        submitted = st.form_submit_button("加入待審核地點", use_container_width=True)
-
-    if submitted:
-        try:
-            append_pending_place(
-                MANUAL_PLACES_PENDING_CSV,
-                places_df,
-                {
-                    "id": place_id,
-                    "name": name,
-                    "display_name": display_name,
-                    "category": category,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "is_destination": is_destination,
-                    "show_marker": show_marker,
-                    "type": place_type,
-                },
-            )
-            _clear_pending_place_form_state()
-            load_places_cached.clear()
-            load_edges_cached.clear()
-            st.session_state.pop("route_state", None)
-            st.session_state["pending_place_success"] = (
-                f"已加入待審核地點：{sanitize_place_id(place_id)}"
-            )
-            st.rerun()
-        except Exception as exc:
-            st.error(f"加入待審核地點失敗：{type(exc).__name__}: {exc}")
+    _render_pending_place_review_form(
+        places_df,
+        pending_csv_path=MANUAL_PLACES_PENDING_CSV,
+        on_pending_place_added=_on_pending_place_added,
+    )
 
 
 def coordinate_delta(point: list[float], place: dict[str, Any]) -> str:
@@ -480,314 +378,29 @@ def prepare_edge_draft(
     return geometry_points, distance_m
 
 
-def _segments_from_editor(segments_df: pd.DataFrame) -> list[dict[str, str]]:
-    """Normalize and order editable forced-route segment rows."""
-    if segments_df is None or segments_df.empty:
-        return []
-    frame = segments_df.copy().fillna("")
-    if "order" not in frame.columns:
-        frame["order"] = range(1, len(frame) + 1)
-    frame["_order"] = pd.to_numeric(frame["order"], errors="coerce").fillna(999999)
-    frame = frame.sort_values("_order", kind="stable")
-    segments: list[dict[str, str]] = []
-    for _, row in frame.iterrows():
-        segment_type = str(row.get("type", "")).strip().lower()
-        from_id = str(row.get("from", "")).strip()
-        to_id = str(row.get("to", "")).strip()
-        if not segment_type and not from_id and not to_id:
-            continue
-        if segment_type not in {"osrm", "manual", "straight"}:
-            raise ValueError("Segment type 必須是 osrm、manual 或 straight。")
-        if not from_id or not to_id:
-            raise ValueError("每個 segment 都必須選擇 from 與 to。")
-        segments.append({"type": segment_type, "from": from_id, "to": to_id})
-    if not segments:
-        raise ValueError("規則至少需要一個 segment。")
-    return segments
+_segments_from_editor = _ui_segments_from_editor
+_segments_frame = _ui_segments_frame
+FORCED_RULE_MODE_OPTIONS = _FORCED_RULE_MODE_OPTIONS
+_forced_rule_modes_selection = _ui_forced_rule_modes_selection
+_apply_forced_rule_modes = _ui_apply_forced_rule_modes
+_forced_rule_modes_label = _ui_forced_rule_modes_label
 
 
-def _segments_frame(rule: dict[str, Any] | None = None) -> pd.DataFrame:
-    segments = (rule or {}).get("forward_segments", [])
-    return pd.DataFrame(
-        [
-            {
-                "order": index,
-                "type": segment.get("type", ""),
-                "from": segment.get("from", ""),
-                "to": segment.get("to", ""),
-            }
-            for index, segment in enumerate(segments, start=1)
-        ],
-        columns=["order", "type", "from", "to"],
+def _on_forced_rules_changed() -> None:
+    st.session_state.pop("route_state", None)
+
+
+def render_forced_route_rules_sidebar(
+    places_df: pd.DataFrame,
+    *,
+    forced_rules_path: str | Path = FORCED_RULES_PATH,
+    on_rules_changed=None,
+) -> None:
+    _render_forced_route_rules_sidebar(
+        places_df=places_df,
+        forced_rules_path=forced_rules_path,
+        on_rules_changed=on_rules_changed or _on_forced_rules_changed,
     )
-
-
-FORCED_RULE_MODE_OPTIONS = {
-    "全部模式": None,
-    "校園路線": [CAMPUS_MODE_ID],
-    "雨天路線": [RAIN_MODE_ID],
-}
-
-
-def _forced_rule_modes_selection(rule: dict[str, Any]) -> str:
-    raw_modes = rule.get("modes", [])
-    if isinstance(raw_modes, str):
-        modes = [raw_modes]
-    else:
-        modes = [str(mode) for mode in raw_modes]
-    for label, mode_ids in FORCED_RULE_MODE_OPTIONS.items():
-        if mode_ids == modes:
-            return label
-    return "全部模式"
-
-
-def _apply_forced_rule_modes(
-    payload: dict[str, Any],
-    mode_selection: str,
-) -> dict[str, Any]:
-    mode_ids = FORCED_RULE_MODE_OPTIONS.get(mode_selection)
-    if mode_ids is None:
-        payload.pop("modes", None)
-    else:
-        payload["modes"] = mode_ids
-    return payload
-
-
-def _forced_rule_modes_label(rule: dict[str, Any]) -> str:
-    mode_labels = {
-        CAMPUS_MODE_ID: "校園路線",
-        RAIN_MODE_ID: "雨天路線",
-    }
-    raw_modes = rule.get("modes", [])
-    if isinstance(raw_modes, str):
-        raw_modes = [raw_modes]
-    return "、".join(
-        mode_labels.get(str(mode), str(mode))
-        for mode in raw_modes
-    )
-
-
-def render_forced_route_rules_sidebar(places_df: pd.DataFrame) -> None:
-    """Render persistent Python/JSON forced-route rule management controls."""
-    all_place_ids = places_df["id"].astype(str).tolist()
-    endpoint_options = ["start", "end", *all_place_ids]
-    segment_columns = {
-        "order": st.column_config.NumberColumn("順序", min_value=1, step=1),
-        "type": st.column_config.SelectboxColumn(
-            "type",
-            options=["osrm", "manual", "straight"],
-            required=True,
-        ),
-        "from": st.column_config.SelectboxColumn(
-            "from",
-            options=endpoint_options,
-            required=True,
-        ),
-        "to": st.column_config.SelectboxColumn(
-            "to",
-            options=endpoint_options,
-            required=True,
-        ),
-    }
-
-    with st.expander("強制路線規則 / 自創道路"):
-        try:
-            rules = load_forced_route_rules(FORCED_RULES_PATH)
-        except Exception as exc:
-            st.error(f"讀取規則失敗：{type(exc).__name__}: {exc}")
-            rules = []
-
-        view_tab, add_tab, edit_tab, transfer_tab = st.tabs(
-            ["查看", "新增", "編輯/刪除", "匯入/匯出"]
-        )
-
-        with view_tab:
-            if not rules:
-                st.info("目前沒有強制路線規則。")
-            for rule in rules:
-                st.markdown(
-                    f"**{rule.get('name', rule.get('id'))}** "
-                    f"({'啟用' if rule.get('enabled') else '停用'})"
-                )
-                st.caption(
-                    f"id={rule.get('id')}｜雙向={bool(rule.get('bidirectional'))}｜"
-                    f"segments={len(rule.get('forward_segments', []))}"
-                )
-                if rule.get("modes"):
-                    st.caption(f"適用模式：{_forced_rule_modes_label(rule)}")
-
-        with add_tab:
-            with st.form("forced_rule_add_form"):
-                rule_id = st.text_input("規則 ID")
-                rule_name = st.text_input("規則名稱")
-                enabled = st.checkbox("啟用規則", value=True)
-                bidirectional = st.checkbox("雙向規則", value=True)
-                mode_selection = st.selectbox(
-                    "適用模式",
-                    options=list(FORCED_RULE_MODE_OPTIONS.keys()),
-                    index=0,
-                )
-                from_ids = st.multiselect("from_place_ids", all_place_ids)
-                to_ids = st.multiselect("to_place_ids", all_place_ids)
-                new_segments = st.data_editor(
-                    pd.DataFrame(
-                        [
-                            {"order": 1, "type": "osrm", "from": "start", "to": "end"}
-                        ]
-                    ),
-                    column_config=segment_columns,
-                    num_rows="dynamic",
-                    hide_index=True,
-                    key="forced_rule_add_segments",
-                    use_container_width=True,
-                )
-                add_submitted = st.form_submit_button("新增規則", use_container_width=True)
-            if add_submitted:
-                try:
-                    payload = _apply_forced_rule_modes(
-                        {
-                            "id": sanitize_place_id(rule_id),
-                            "name": rule_name,
-                            "enabled": enabled,
-                            "bidirectional": bidirectional,
-                            "from_place_ids": from_ids,
-                            "to_place_ids": to_ids,
-                            "forward_segments": _segments_from_editor(new_segments),
-                        },
-                        mode_selection,
-                    )
-                    add_forced_route_rule(
-                        payload,
-                        FORCED_RULES_PATH,
-                    )
-                    st.session_state.pop("route_state", None)
-                    st.success("強制路線規則已新增。")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"新增規則失敗：{type(exc).__name__}: {exc}")
-
-        with edit_tab:
-            if rules:
-                selected_rule_id = st.selectbox(
-                    "選擇規則",
-                    [str(rule.get("id")) for rule in rules],
-                    format_func=lambda rule_id: next(
-                        (
-                            str(rule.get("name") or rule_id)
-                            for rule in rules
-                            if rule.get("id") == rule_id
-                        ),
-                        rule_id,
-                    ),
-                )
-                selected_rule = next(
-                    rule for rule in rules if rule.get("id") == selected_rule_id
-                )
-                with st.form("forced_rule_edit_form"):
-                    edit_name = st.text_input(
-                        "規則名稱",
-                        value=str(selected_rule.get("name", "")),
-                    )
-                    edit_enabled = st.checkbox(
-                        "啟用規則",
-                        value=bool(selected_rule.get("enabled")),
-                    )
-                    edit_bidirectional = st.checkbox(
-                        "雙向規則",
-                        value=bool(selected_rule.get("bidirectional")),
-                    )
-                    edit_mode_selection = st.selectbox(
-                        "適用模式",
-                        options=list(FORCED_RULE_MODE_OPTIONS.keys()),
-                        index=list(FORCED_RULE_MODE_OPTIONS.keys()).index(
-                            _forced_rule_modes_selection(selected_rule)
-                        ),
-                    )
-                    edit_from_ids = st.multiselect(
-                        "from_place_ids",
-                        all_place_ids,
-                        default=[
-                            item
-                            for item in selected_rule.get("from_place_ids", [])
-                            if item in all_place_ids
-                        ],
-                    )
-                    edit_to_ids = st.multiselect(
-                        "to_place_ids",
-                        all_place_ids,
-                        default=[
-                            item
-                            for item in selected_rule.get("to_place_ids", [])
-                            if item in all_place_ids
-                        ],
-                    )
-                    edited_segments = st.data_editor(
-                        _segments_frame(selected_rule),
-                        column_config=segment_columns,
-                        num_rows="dynamic",
-                        hide_index=True,
-                        key=f"forced_rule_edit_segments_{selected_rule_id}",
-                        use_container_width=True,
-                    )
-                    save_submitted = st.form_submit_button(
-                        "儲存規則",
-                        use_container_width=True,
-                    )
-                if save_submitted:
-                    try:
-                        payload = _apply_forced_rule_modes(
-                            {
-                                **selected_rule,
-                                "name": edit_name,
-                                "enabled": edit_enabled,
-                                "bidirectional": edit_bidirectional,
-                                "from_place_ids": edit_from_ids,
-                                "to_place_ids": edit_to_ids,
-                                "forward_segments": _segments_from_editor(edited_segments),
-                            },
-                            edit_mode_selection,
-                        )
-                        update_forced_route_rule(
-                            selected_rule_id,
-                            payload,
-                            FORCED_RULES_PATH,
-                        )
-                        st.session_state.pop("route_state", None)
-                        st.success("強制路線規則已儲存。")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"儲存規則失敗：{type(exc).__name__}: {exc}")
-                if st.button("刪除選取規則", type="secondary", use_container_width=True):
-                    delete_forced_route_rule(selected_rule_id, FORCED_RULES_PATH)
-                    st.session_state.pop("route_state", None)
-                    st.rerun()
-
-        with transfer_tab:
-            export_payload = json.dumps(
-                {"rules": rules},
-                ensure_ascii=False,
-                indent=2,
-            )
-            st.download_button(
-                "匯出 forced_route_rules.json",
-                data=export_payload,
-                file_name="forced_route_rules.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-            uploaded = st.file_uploader("匯入 forced_route_rules.json", type=["json"])
-            if st.button("套用匯入規則", use_container_width=True):
-                if uploaded is None:
-                    st.error("請先選擇 JSON 檔案。")
-                else:
-                    try:
-                        payload = json.loads(uploaded.getvalue().decode("utf-8-sig"))
-                        save_forced_route_rules(payload, FORCED_RULES_PATH)
-                        st.session_state.pop("route_state", None)
-                        st.success("規則已匯入。")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"匯入規則失敗：{type(exc).__name__}: {exc}")
 
 
 def _finish_admin_write(message: str, *, clear_places: bool, clear_edges: bool) -> None:
@@ -1150,7 +763,11 @@ def main() -> None:
         if selected_mode == CAMPUS_MODE_ID:
             render_data_admin_sidebar(places_df, edges_df)
         if selected_mode in {CAMPUS_MODE_ID, RAIN_MODE_ID}:
-            render_forced_route_rules_sidebar(places_df)
+            render_forced_route_rules_sidebar(
+                places_df=places_df,
+                forced_rules_path=FORCED_RULES_PATH,
+                on_rules_changed=_on_forced_rules_changed,
+            )
 
     controls = st.columns(3)
     with controls[0]:
