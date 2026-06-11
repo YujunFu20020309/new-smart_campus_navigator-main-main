@@ -6,10 +6,13 @@ import pytest
 from src.campus_graph import build_campus_graph
 from src.data_admin import (
     EDGE_COLUMNS,
+    PENDING_PLACE_COLUMNS,
     PLACE_COLUMNS,
     append_edge,
+    append_pending_place,
     append_place,
     load_edges_for_editing,
+    load_pending_places,
     load_places_for_editing,
     save_edges,
     save_places,
@@ -56,6 +59,22 @@ def _new_place():
     }
 
 
+def _pending_place(**changes):
+    place = {
+        "id": "new_library",
+        "name": "New Library",
+        "display_name": "New Library",
+        "category": "library",
+        "latitude": "24.796",
+        "longitude": "120.996",
+        "is_destination": True,
+        "show_marker": True,
+        "type": "candidate",
+    }
+    place.update(changes)
+    return place
+
+
 def _new_edge(**changes):
     edge = {
         "from_id": "node_a",
@@ -85,6 +104,69 @@ def test_append_place_adds_valid_place_and_rejects_duplicate(tmp_path):
 
     with pytest.raises(ValueError, match="already exists"):
         append_place(path, _new_place())
+
+
+def test_append_pending_place_does_not_modify_places_csv(tmp_path):
+    places_path = tmp_path / "places.csv"
+    pending_path = tmp_path / "manual_places_pending.csv"
+    save_places(places_path, _places_df())
+    official_places = load_places_for_editing(places_path)
+    before = places_path.read_bytes()
+
+    append_pending_place(pending_path, official_places, _pending_place())
+
+    assert places_path.read_bytes() == before
+    assert pending_path.exists()
+
+
+def test_pending_place_csv_uses_expected_columns_and_fixed_review_fields(tmp_path):
+    places_path = tmp_path / "places.csv"
+    pending_path = tmp_path / "manual_places_pending.csv"
+    save_places(places_path, _places_df())
+    official_places = load_places_for_editing(places_path)
+
+    append_pending_place(
+        pending_path,
+        official_places,
+        _pending_place(notes="user supplied note", source="manual"),
+    )
+    pending = load_pending_places(pending_path)
+
+    assert list(pending.columns) == PENDING_PLACE_COLUMNS
+    assert pending.loc[0, "id"] == "new_library"
+    assert pending.loc[0, "source"] == "manual_ui_pending"
+    assert pending.loc[0, "notes"] == "pending_review"
+    assert pending.loc[0, "type"] == "candidate"
+    assert pending.loc[0, "is_destination"] == "1"
+    assert pending.loc[0, "show_marker"] == "1"
+
+
+def test_pending_place_rejects_duplicate_ids(tmp_path):
+    places_path = tmp_path / "places.csv"
+    pending_path = tmp_path / "manual_places_pending.csv"
+    save_places(places_path, _places_df())
+    official_places = load_places_for_editing(places_path)
+
+    with pytest.raises(ValueError, match="places.csv"):
+        append_pending_place(pending_path, official_places, _pending_place(id="node_a"))
+
+    append_pending_place(pending_path, official_places, _pending_place())
+    with pytest.raises(ValueError, match="pending"):
+        append_pending_place(pending_path, official_places, _pending_place())
+
+
+def test_pending_place_rejects_out_of_bounds_coordinates(tmp_path):
+    places_path = tmp_path / "places.csv"
+    pending_path = tmp_path / "manual_places_pending.csv"
+    save_places(places_path, _places_df())
+    official_places = load_places_for_editing(places_path)
+
+    with pytest.raises(ValueError, match="outside"):
+        append_pending_place(
+            pending_path,
+            official_places,
+            _pending_place(latitude="25.0", longitude="121.5"),
+        )
 
 
 def test_append_edge_validates_ids_geometry_and_accepts_blank(tmp_path):

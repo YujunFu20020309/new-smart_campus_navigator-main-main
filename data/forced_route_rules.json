@@ -8,8 +8,7 @@
       "from_place_ids": [
         "main_gate",
         "engineering_building_i",
-        "main_library",
-        "motor_parking_exit"
+        "main_library"
       ],
       "to_place_ids": [
         "delta_building",
@@ -305,6 +304,55 @@
           "type": "straight",
           "from": "eecs_building_front",
           "to": "end"
+        }
+      ]
+    },
+    {
+      "id": "motor_to_eecs",
+      "name": "motor_to_eecs",
+      "enabled": true,
+      "bidirectional": true,
+      "from_place_ids": [
+        "motor_parking_exit"
+      ],
+      "to_place_ids": [
+        "eecs_building"
+      ],
+      "forward_segments": [
+        {
+          "type": "osrm",
+          "from": "start",
+          "to": "che_building_beside1"
+        },
+        {
+          "type": "straight",
+          "from": "che_building_beside1",
+          "to": "che_building"
+        },
+        {
+          "type": "straight",
+          "from": "che_building",
+          "to": "che_building_libary"
+        },
+        {
+          "type": "straight",
+          "from": "che_building_libary",
+          "to": "libary_back"
+        },
+        {
+          "type": "osrm",
+          "from": "libary_back",
+          "to": "red_bridge_right"
+        },
+        {
+          "type": "straight",
+          "from": "red_bridge_right",
+          "to": "red_bridge_left"
+        },
+        {
+          "type": "straight",
+          "from": "red_bridge_left",
+          "to": "eecs_building"
         }
       ]
     }

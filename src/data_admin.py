@@ -23,6 +23,7 @@ from .utils import (
     is_blank,
     is_enabled_flag,
     parse_coordinate,
+    validate_coordinate_bounds,
     validate_places,
 )
 
@@ -32,6 +33,29 @@ PLACE_COLUMNS = [
     "is_destination",
     "show_marker",
 ]
+PENDING_PLACE_COLUMNS = [
+    "id",
+    "name",
+    "display_name",
+    "category",
+    "latitude",
+    "longitude",
+    "source",
+    "notes",
+    "is_destination",
+    "show_marker",
+    "type",
+]
+PENDING_PLACE_CATEGORY_OPTIONS = [
+    "building",
+    "gate",
+    "library",
+    "cafeteria",
+    "dorm",
+    "landmark",
+]
+PENDING_PLACE_SOURCE = "manual_ui_pending"
+PENDING_PLACE_NOTES = "pending_review"
 EDGE_COLUMNS = list(REQUIRED_EDGE_COLUMNS)
 CSV_ENCODINGS = ("utf-8-sig", "utf-8", "big5", "cp950")
 
@@ -72,6 +96,14 @@ def load_places_for_editing(path: str | Path) -> pd.DataFrame:
     return _ordered_frame(places_df, PLACE_COLUMNS)
 
 
+def load_pending_places(path: str | Path) -> pd.DataFrame:
+    """Load pending manual places, returning an empty frame when absent."""
+    pending_path = Path(path)
+    if not pending_path.exists():
+        return pd.DataFrame(columns=PENDING_PLACE_COLUMNS)
+    return _ordered_frame(_read_csv_with_fallback(pending_path), PENDING_PLACE_COLUMNS)
+
+
 def load_edges_for_editing(path: str | Path) -> pd.DataFrame:
     """Load campus_edges.csv with common Traditional Chinese CSV encoding fallbacks."""
     edges_df = ensure_edge_control_columns(_read_csv_with_fallback(path))
@@ -87,6 +119,15 @@ def save_places(path: str | Path, df: pd.DataFrame) -> None:
     validate_places(places_df)
     ensure_parent_dir(path)
     places_df.to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def save_pending_places(path: str | Path, df: pd.DataFrame) -> None:
+    """Save pending places without touching the verified places.csv file."""
+    pending_df = _ordered_frame(df, PENDING_PLACE_COLUMNS)
+    pending_df["is_destination"] = pending_df["is_destination"].map(_flag)
+    pending_df["show_marker"] = pending_df["show_marker"].map(_flag)
+    ensure_parent_dir(path)
+    pending_df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 def save_edges(path: str | Path, df: pd.DataFrame) -> None:
@@ -144,6 +185,55 @@ def append_place(path: str | Path, place_dict: dict[str, Any]) -> pd.DataFrame:
 
     updated = pd.concat([places_df, pd.DataFrame([row])], ignore_index=True)
     save_places(path, updated)
+    return updated
+
+
+def append_pending_place(
+    pending_path: str | Path,
+    official_places_df: pd.DataFrame,
+    place_dict: dict[str, Any],
+) -> pd.DataFrame:
+    """Validate and append one map-clicked place to the pending review CSV."""
+    pending_df = load_pending_places(pending_path)
+    place_id = sanitize_place_id(place_dict.get("id"))
+    if not place_id:
+        raise ValueError("Place id cannot be blank.")
+
+    official_ids = set(official_places_df["id"].astype(str))
+    pending_ids = set(pending_df["id"].astype(str))
+    if place_id in official_ids:
+        raise ValueError(f"Place id already exists in places.csv: {place_id}")
+    if place_id in pending_ids:
+        raise ValueError(f"Place id already exists in pending places: {place_id}")
+
+    category = str(place_dict.get("category", "")).strip().lower()
+    if category not in PENDING_PLACE_CATEGORY_OPTIONS:
+        allowed = ", ".join(PENDING_PLACE_CATEGORY_OPTIONS)
+        raise ValueError(f"category must be one of: {allowed}")
+
+    latitude = parse_coordinate(place_dict.get("latitude"))
+    longitude = parse_coordinate(place_dict.get("longitude"))
+    if latitude is None or longitude is None:
+        raise ValueError("latitude and longitude are required.")
+
+    row = {column: place_dict.get(column, "") for column in PENDING_PLACE_COLUMNS}
+    row.update(
+        {
+            "id": place_id,
+            "category": category,
+            "latitude": str(float(latitude)),
+            "longitude": str(float(longitude)),
+            "source": PENDING_PLACE_SOURCE,
+            "notes": PENDING_PLACE_NOTES,
+            "is_destination": _flag(row.get("is_destination")),
+            "show_marker": _flag(row.get("show_marker")),
+        }
+    )
+    if not validate_coordinate_bounds(row):
+        raise ValueError("Coordinates are outside the expected NTHU campus bounds.")
+
+    updated = pd.concat([pending_df, pd.DataFrame([row])], ignore_index=True)
+    save_pending_places(pending_path, updated)
     return updated
 
 

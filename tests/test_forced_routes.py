@@ -24,7 +24,12 @@ from src.campus_graph import load_edges
 
 
 RULE_PATH = Path("data/forced_route_rules.json")
-FORWARD_STARTS = [
+RED_BRIDGE_STARTS = [
+    "main_gate",
+    "engineering_building_i",
+    "main_library",
+]
+LAKESIDE_STARTS = [
     "main_gate",
     "engineering_building_i",
     "main_library",
@@ -39,7 +44,7 @@ ALL_RED_BRIDGE_ROUTES = [
         "forward",
         [start_id, "red_bridge_right", "red_bridge_left", end_id],
     )
-    for start_id in FORWARD_STARTS
+    for start_id in RED_BRIDGE_STARTS
     for end_id in FORWARD_ENDS
 ] + [
     (
@@ -49,7 +54,7 @@ ALL_RED_BRIDGE_ROUTES = [
         [start_id, "red_bridge_left", "red_bridge_right", end_id],
     )
     for start_id in FORWARD_ENDS
-    for end_id in FORWARD_STARTS
+    for end_id in RED_BRIDGE_STARTS
 ]
 
 
@@ -76,7 +81,7 @@ def test_default_red_bridge_rule_content():
     assert rule["id"] == "red_bridge_rule"
     assert rule["enabled"] is True
     assert rule["bidirectional"] is True
-    assert rule["from_place_ids"] == FORWARD_STARTS
+    assert rule["from_place_ids"] == RED_BRIDGE_STARTS
     assert rule["to_place_ids"] == FORWARD_ENDS
     assert [segment["type"] for segment in rule["forward_segments"]] == [
         "osrm",
@@ -92,7 +97,7 @@ def test_default_lakeside_rule_content():
     assert rule["name"] == "Lakeside 強制路線"
     assert rule["enabled"] is True
     assert rule["bidirectional"] is True
-    assert rule["from_place_ids"] == FORWARD_STARTS
+    assert rule["from_place_ids"] == LAKESIDE_STARTS
     assert rule["to_place_ids"] == LAKESIDE_ENDS
     assert [segment["type"] for segment in rule["forward_segments"]] == [
         "osrm",
@@ -101,7 +106,7 @@ def test_default_lakeside_rule_content():
     ]
 
 
-@pytest.mark.parametrize("start_id", FORWARD_STARTS)
+@pytest.mark.parametrize("start_id", RED_BRIDGE_STARTS)
 @pytest.mark.parametrize("end_id", FORWARD_ENDS)
 def test_all_forward_red_bridge_pairs_match(start_id, end_id):
     match = match_forced_route_rule(start_id, end_id, path=RULE_PATH)
@@ -112,7 +117,7 @@ def test_all_forward_red_bridge_pairs_match(start_id, end_id):
 
 
 @pytest.mark.parametrize("start_id", FORWARD_ENDS)
-@pytest.mark.parametrize("end_id", FORWARD_STARTS)
+@pytest.mark.parametrize("end_id", RED_BRIDGE_STARTS)
 def test_all_backward_red_bridge_pairs_match(start_id, end_id):
     match = match_forced_route_rule(start_id, end_id, path=RULE_PATH)
 
@@ -280,7 +285,7 @@ def test_all_required_routes_use_hybrid_forced_red_bridge_route(
             "forward",
             [start_id, "xuesi_load", "fengyun_load", end_id],
         )
-        for start_id in FORWARD_STARTS
+        for start_id in LAKESIDE_STARTS
         for end_id in LAKESIDE_ENDS
     ]
     + [
@@ -291,7 +296,7 @@ def test_all_required_routes_use_hybrid_forced_red_bridge_route(
             [start_id, "fengyun_load", "xuesi_load", end_id],
         )
         for start_id in LAKESIDE_ENDS
-        for end_id in FORWARD_STARTS
+        for end_id in LAKESIDE_STARTS
     ],
 )
 def test_all_required_lakeside_routes_use_hybrid_forced_route(

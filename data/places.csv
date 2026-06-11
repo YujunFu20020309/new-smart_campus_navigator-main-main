@@ -35,3 +35,6 @@ nthu_south_gate,清大南門,清大南門,building,24.786686,120.988845,manual,m
 nthu_hall_of_fame_1,清華名人堂旁1,清華名人堂旁1,road_node,24.79394,120.992651,manual,manual_added,1,0
 physics_building_front,物理館前人行道,物理館前人行道,road_node,24.794232,120.992651,manual,manual_added,1,0
 eecs_building_front,資電館前人行道,資電館前人行道,road_node,24.794977,120.992627,manual,manual_added,1,0
+teaching_building,教育館,教育館,building,24.795737,120.99384,manual,manual_added,1,1
+e3,工程三館,工程三館,building,24.796406,120.992657,manual,manual_added,1,1
+test1,同位素館,同位素館,building,24.789267,120.992163,manual,manual_added,1,1
