@@ -143,6 +143,20 @@ def route_matches_selection(
     )
 
 
+def _truthy_setting(value: Any) -> bool:
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def is_public_site_mode() -> bool:
+    public_site = os.getenv("PUBLIC_SITE")
+    if public_site is None:
+        try:
+            public_site = st.secrets["PUBLIC_SITE"]
+        except Exception:
+            public_site = None
+    return _truthy_setting(public_site)
+
+
 route_failure = _route_failure
 get_campus_route_features = _get_campus_route_features
 _numeric_difference = _route_numeric_difference
@@ -638,12 +652,17 @@ def main() -> None:
     with st.sidebar:
         st.markdown("### 專案狀態")
         st.write("目前版本：Safety MVP + Local Graph")
+        public_site_mode = is_public_site_mode()
         demo_mode = st.toggle("Demo mode", value=True)
-        allow_live_osrm = st.checkbox(
-            "OSRM 快取不存在時允許呼叫 OSRM",
-            value=not demo_mode,
-            help="影響 OSRM 基本路線，以及校園道路路線最後一層 OSRM fallback。",
-        )
+        if public_site_mode:
+            allow_live_osrm = True
+            st.caption("公開網站模式：若快取不存在，系統會自動呼叫 OSRM。")
+        else:
+            allow_live_osrm = st.checkbox(
+                "OSRM 快取不存在時允許呼叫 OSRM",
+                value=not demo_mode,
+                help="影響 OSRM 基本路線，以及校園道路路線最後一層 OSRM fallback。",
+            )
         osrm_profile = "foot"
         st.caption("OSRM 模式：walking（固定）")
         ignore_osrm_cache = st.checkbox(
