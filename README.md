@@ -98,12 +98,35 @@ python -m pytest
 │   ├── geo_utils.py
 │   ├── map_view.py
 │   ├── route_modes.py
+│   ├── route_service.py
 │   ├── routing_osrm.py
+│   ├── ui_forced_routes.py
+│   ├── ui_pending_places.py
+│   ├── ui_route_info.py
 │   └── utils.py
 ├── tests/
 └── tools/
     └── merge_pending_places.py
 ```
+
+## 四階段重構摘要
+
+本專案已將原本集中在 `app.py` 的路線計算與部分 Streamlit UI 逐步拆出，目標是讓 `app.py` 保留入口流程、相容 wrapper 與地圖互動，其他邏輯依職責放到 `src/` 模組。
+
+| 階段 | 模組 | 重構內容 |
+| --- | --- | --- |
+| 第一階段 | `src/route_service.py` | 搬出 OSRM、Campus、Rain、Compare 路線計算與比較摘要邏輯。`app.py` 仍保留原本可被 tests import 的函式名稱，透過 wrapper 注入 OSRM client、forced route rule matcher、graph builder 與 route computer。 |
+| 第二階段 | `src/ui_pending_places.py` | 搬出新增地點 pending review UI、Folium 點擊座標解析、表單清除與 pending CSV 寫入流程。`app.py` 仍保留 callback，負責清 cache 與維持 `st.session_state` 行為。 |
+| 第三階段 | `src/ui_forced_routes.py` | 搬出強制路線規則側邊欄 UI，包含 mode 選擇、segment editor、規則新增、更新與刪除。`app.py` 只傳入資料路徑與 rules changed callback。 |
+| 第四階段 | `src/ui_route_info.py` | 搬出右側路線資訊 UI，包含一般路線摘要、Compare 模式資訊、OSRM Debug、模式說明文字與 coordinate delta 顯示。`app.py` 仍保留 `render_compare_route_info()` 和 `coordinate_delta()` 的 import 名稱以維持相容。 |
+
+重構期間保留的邊界：
+
+- 不改變 OSRM / Campus / Rain / Compare 路線模式行為。
+- 不改變 `route_service.py` 的路線計算邏輯。
+- 不改變 `route_result`、`active_route` 或 compare result 的 dict 結構。
+- 不改變既有 Streamlit UI 文字、`st.session_state` key、`st_folium` key、`returned_objects` 或地圖點選行為。
+- 不讓 UI 模組 import `app.py`；需要的資料由 `app.py` 以參數傳入。
 
 ## 核心檔案
 
@@ -113,13 +136,31 @@ Streamlit 主程式，負責：
 
 - 載入 places、campus edges 和 forced route rules。
 - 呈現側邊欄與地圖。
+- 保留可供 tests import 的相容函式名稱，並把路線計算委派到 `src/route_service.py`。
 - 根據路線模式 dispatch：
   - `get_osrm_route_for_places()`
   - `get_campus_route()`
   - `get_rain_route()`
   - `build_route_comparison()`
-- 管理 demo mode、OSRM live request、cache、debug 資訊與資料管理 UI。
+- 管理 demo mode、OSRM live request、cache 與資料管理 UI。
+- 將新增地點審核、強制路線規則與右側路線資訊 UI 委派到 `src/ui_pending_places.py`、`src/ui_forced_routes.py`、`src/ui_route_info.py`。
 - 在「新增地點模式」中接收 Folium `last_clicked` / `last_object_clicked`，並把點擊座標暫存到 `st.session_state["pending_clicked_location"]`。
+
+### `src/route_service.py`
+
+集中處理路線計算與模式分派，包含 OSRM、校園路線、雨天路線與比較模式。`app.py` 透過 wrapper 注入 OSRM client、forced route rule matcher 與 graph builder，讓 Streamlit 入口維持薄一點，同時保留原本可測試的函式名稱。
+
+### `src/ui_pending_places.py`
+
+負責新增地點 pending review UI，包含 Folium 點擊座標帶入、表單狀態清除與待審核資料寫入。
+
+### `src/ui_forced_routes.py`
+
+負責強制路線規則側邊欄 UI，包含規則新增、編輯、刪除、mode 選擇與 segment editor。
+
+### `src/ui_route_info.py`
+
+負責右側路線資訊 UI，包含一般路線摘要、比較模式資訊、OSRM Debug、模式說明文字與 route geometry coordinate delta 顯示。
 
 ### `src/route_modes.py`
 
