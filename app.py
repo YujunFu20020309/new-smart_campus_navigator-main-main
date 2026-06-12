@@ -37,6 +37,7 @@ from src.map_view import build_route_map
 from src.route_modes import (
     CAMPUS_MODE_ID,
     COMPARE_MODE_ID,
+    LOCAL_GRAPH_MODE_ID,
     OSRM_MODE_ID,
     RAIN_MODE_ID,
     get_available_modes,
@@ -656,7 +657,6 @@ def main() -> None:
         demo_mode = st.toggle("Demo mode", value=True)
         if public_site_mode:
             allow_live_osrm = True
-            st.caption("公開網站模式：若快取不存在，系統會自動呼叫 OSRM。")
         else:
             allow_live_osrm = st.checkbox(
                 "OSRM 快取不存在時允許呼叫 OSRM",
@@ -678,10 +678,19 @@ def main() -> None:
 
         st.divider()
         route_modes = get_available_modes()
+        mode_options = list(route_modes.keys())
+        if public_site_mode:
+            default_mode_index = (
+                mode_options.index(LOCAL_GRAPH_MODE_ID)
+                if LOCAL_GRAPH_MODE_ID in mode_options
+                else 0
+            )
+        else:
+            default_mode_index = 0
         selected_mode = st.selectbox(
             "路線模式",
-            options=list(route_modes.keys()),
-            index=0,
+            options=mode_options,
+            index=default_mode_index,
             format_func=lambda mode_id: route_modes[mode_id]["label"],
         )
         show_debug_nodes = False
