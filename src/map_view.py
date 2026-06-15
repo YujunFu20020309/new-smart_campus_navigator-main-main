@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import folium
@@ -112,12 +113,28 @@ def add_start_end_markers(
         lat = parse_coordinate(place.get("latitude"))
         lon = parse_coordinate(place.get("longitude"))
         name = _place_value(place, "display_name", _place_value(place, "name", ""))
+        is_current_location = str(place.get("source", "")) == "browser_geolocation"
+        marker_label = "My current location" if is_current_location else label
+        marker_icon = "user" if is_current_location else icon
         folium.Marker(
             location=[lat, lon],
-            popup=folium.Popup(f"<b>{label}</b><br>{name}", max_width=280),
-            tooltip=f"{label}: {name}",
-            icon=folium.Icon(color=color, icon=icon),
+            popup=folium.Popup(f"<b>{marker_label}</b><br>{name}", max_width=280),
+            tooltip=f"{marker_label}: {name}",
+            icon=folium.Icon(color=color, icon=marker_icon),
         ).add_to(map_obj)
+        if is_current_location:
+            accuracy = parse_coordinate(place.get("accuracy_m"))
+            if accuracy is not None and math.isfinite(accuracy) and accuracy > 0:
+                folium.Circle(
+                    location=[lat, lon],
+                    radius=accuracy,
+                    color="#16a34a",
+                    weight=1,
+                    fill=True,
+                    fill_color="#22c55e",
+                    fill_opacity=0.12,
+                    tooltip=f"Location accuracy: about {accuracy:.0f} m",
+                ).add_to(map_obj)
     return map_obj
 
 

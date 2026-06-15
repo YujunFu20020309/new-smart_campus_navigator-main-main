@@ -19,6 +19,7 @@ https://nthu-smart-campus-navigator.streamlit.app
 
 - Streamlit 互動式介面，選擇起點、終點與路線模式後顯示地圖和路線資訊。
 - OSRM walking 路線，固定使用 `foot` profile，並以 `data/route_cache.json` 快取結果。
+- OSRM 模式可選擇使用瀏覽器目前位置作為起點，定位資料只保留在該使用者的 Streamlit session。
 - 校園自訂路線，使用 `data/campus_edges.csv` 建立 NetworkX graph 並計算校園內部路線。
 - 強制路線規則，使用 `data/forced_route_rules.json` 定義 OSRM、manual、straight 混合路段。
 - 雨天路線模式，優先套用雨天專用強制規則，沒有符合規則時回到純 OSRM walking。
@@ -426,6 +427,19 @@ python tools/merge_pending_places.py
 - 若需要重新呼叫 OSRM，可勾選「OSRM 快取不存在時允許呼叫 OSRM」或「忽略快取，重新呼叫 OSRM」。
 
 `data/route_cache.json` 使用 walking v2 key 格式，OSRM profile 固定為 `foot`。
+
+## 使用瀏覽器目前位置
+
+Phase 1 僅在 `OSRM 路線` 模式支援目前位置起點。選擇「使用我的目前位置」後，按下「取得我的目前位置」，瀏覽器會要求定位權限；成功時地圖會顯示目前位置 marker 與定位精確度範圍。
+
+- 定位結果包含 latitude、longitude、accuracy 與 browser timestamp（若瀏覽器有提供）。
+- 最新有效定位只存放在 `st.session_state["current_location"]`，不會寫入 `places.csv`、工作日誌或其他共享檔案。
+- GPS 起點路線不讀取也不寫入 `data/route_cache.json`，因此必須允許 live OSRM request。
+- 若重新定位失敗，系統會保留先前有效位置並標示為可能過期。
+- 定位精確度超過 100 公尺或位置距離清大較遠時，畫面會顯示警告，但 OSRM 模式仍可由使用者決定是否計算。
+- 校園路線、雨天路線與比較模式目前不接受 GPS 起點；Phase 1 不包含 campus graph snapping。
+
+瀏覽器 Geolocation API 需要安全環境。Streamlit Community Cloud 的 HTTPS 可直接使用；本機請使用 `http://localhost:8501`，不要改用一般區網 HTTP IP 測試手機定位，除非另外配置 HTTPS。
 
 ## 公開網站模式與 OSRM live request
 

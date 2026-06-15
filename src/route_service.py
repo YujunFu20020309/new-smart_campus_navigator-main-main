@@ -9,6 +9,7 @@ from src.campus_graph import build_campus_graph, compute_campus_route
 from src.forced_routes import match_forced_route_rule, route_with_forced_rule
 from src.route_modes import CAMPUS_MODE_ID, COMPARE_MODE_ID, OSRM_MODE_ID, RAIN_MODE_ID
 from src.routing_osrm import get_osrm_route
+from src.user_location import validate_coordinates
 from src.utils import get_place_by_id, parse_coordinate, place_has_coordinates
 
 
@@ -180,6 +181,52 @@ def get_osrm_route_for_places(
         allow_network=allow_live_osrm or ignore_osrm_cache,
         ignore_cache=ignore_osrm_cache,
     )
+
+
+def get_osrm_route_from_coordinates(
+    places_df: pd.DataFrame,
+    start_latitude: Any,
+    start_longitude: Any,
+    end_id: str,
+    *,
+    allow_live_osrm: bool,
+    route_cache_path: str | Path,
+    osrm_profile: str = "foot",
+    ignore_osrm_cache: bool = False,
+    osrm_router: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Route from a session-only coordinate to one saved destination place."""
+    osrm_router = get_osrm_route if osrm_router is None else osrm_router
+    try:
+        start_lat, start_lon = validate_coordinates(start_latitude, start_longitude)
+        end_place = get_place_by_id(places_df, end_id)
+    except (KeyError, ValueError) as exc:
+        return route_failure("osrm", OSRM_MODE_ID, str(exc))
+
+    if not place_has_coordinates(end_place):
+        return route_failure("osrm", OSRM_MODE_ID, "End place is missing coordinates.")
+    if not allow_live_osrm and not ignore_osrm_cache:
+        return route_failure(
+            "osrm",
+            OSRM_MODE_ID,
+            "gps_live_osrm_required: GPS-origin routes bypass the persistent route cache. "
+            "Enable live OSRM to calculate this route.",
+        )
+
+    result = osrm_router(
+        start_lat,
+        start_lon,
+        parse_coordinate(end_place["latitude"]),
+        parse_coordinate(end_place["longitude"]),
+        profile="foot",
+        cache_path=route_cache_path,
+        allow_network=allow_live_osrm or ignore_osrm_cache,
+        ignore_cache=ignore_osrm_cache,
+        persist_cache=False,
+    )
+    if isinstance(result, dict):
+        result["gps_origin"] = True
+    return result
 
 
 def get_campus_route(

@@ -68,6 +68,32 @@ def test_stale_route_session_state_is_not_reused():
     assert route_matches_selection(stale_state, "a", "b", OSRM_MODE_ID) is False
 
 
+def test_route_session_state_requires_matching_start_signature():
+    route_state = {
+        "start_id": "__current_location__",
+        "start_signature": "gps:24.79590,120.99360",
+        "end_id": "eecs_building",
+        "mode_id": OSRM_MODE_ID,
+        "route_result_version": ROUTE_RESULT_VERSION,
+        "result": {"success": True},
+    }
+
+    assert route_matches_selection(
+        route_state,
+        "__current_location__",
+        "eecs_building",
+        OSRM_MODE_ID,
+        start_signature="gps:24.79590,120.99360",
+    ) is True
+    assert route_matches_selection(
+        route_state,
+        "__current_location__",
+        "eecs_building",
+        OSRM_MODE_ID,
+        start_signature="gps:24.79592,120.99360",
+    ) is False
+
+
 def test_osrm_mode_does_not_load_campus_edges():
     with patch("app.load_edges_cached") as load_edges:
         edges_df, error = load_campus_edges_for_mode(OSRM_MODE_ID)

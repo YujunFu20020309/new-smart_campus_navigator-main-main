@@ -193,6 +193,7 @@ def get_osrm_route(
     osrm_base_url: str | None = None,
     timeout: float = 10.0,
     ignore_cache: bool = False,
+    persist_cache: bool = True,
 ) -> dict[str, Any]:
     """Fetch a route from OSRM, returning cached data when available."""
     normalized_profile = normalize_profile(profile)
@@ -222,23 +223,24 @@ def get_osrm_route(
         end_lon_f,
         normalized_profile,
     )
-    cache = _load_cache(cache_path)
-    cached = cache["routes"].get(cache_key)
-    if isinstance(cached, dict) and _is_walking_cache_entry(cached) and not ignore_cache:
-        result = dict(cached)
-        result.setdefault("osrm_duration_s", result.get("duration_s"))
-        result["duration_s"], result["duration_source"] = resolve_walking_duration_s(
-            result.get("distance_m") or 0,
-            result.get("osrm_duration_s"),
-        )
-        result["cache_hit"] = True
-        result.setdefault("source", "osrm")
-        result.setdefault("error", None)
-        result.setdefault("osrm_url", osrm_url)
-        result.setdefault("profile", normalized_profile)
-        result.setdefault("transport_mode", WALKING_TRANSPORT_MODE)
-        result.setdefault("cache_key", cache_key)
-        return result
+    cache = _load_cache(cache_path) if persist_cache else _empty_cache()
+    if persist_cache:
+        cached = cache["routes"].get(cache_key)
+        if isinstance(cached, dict) and _is_walking_cache_entry(cached) and not ignore_cache:
+            result = dict(cached)
+            result.setdefault("osrm_duration_s", result.get("duration_s"))
+            result["duration_s"], result["duration_source"] = resolve_walking_duration_s(
+                result.get("distance_m") or 0,
+                result.get("osrm_duration_s"),
+            )
+            result["cache_hit"] = True
+            result.setdefault("source", "osrm")
+            result.setdefault("error", None)
+            result.setdefault("osrm_url", osrm_url)
+            result.setdefault("profile", normalized_profile)
+            result.setdefault("transport_mode", WALKING_TRANSPORT_MODE)
+            result.setdefault("cache_key", cache_key)
+            return result
 
     if not allow_network:
         return _failure(
@@ -332,10 +334,11 @@ def get_osrm_route(
         cache_key=cache_key,
     )
 
-    cache["routes"][cache_key] = {
-        **result,
-        "cache_hit": False,
-        "cached_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _save_cache(cache_path, cache)
+    if persist_cache:
+        cache["routes"][cache_key] = {
+            **result,
+            "cache_hit": False,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _save_cache(cache_path, cache)
     return result

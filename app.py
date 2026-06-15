@@ -50,6 +50,7 @@ from src.route_service import (
     get_campus_route as _get_campus_route,
     get_campus_route_features as _get_campus_route_features,
     get_osrm_route_for_places as _get_osrm_route_for_places,
+    get_osrm_route_from_coordinates as _get_osrm_route_from_coordinates,
     get_rain_route as _get_rain_route,
     route_failure as _route_failure,
 )
@@ -69,10 +70,17 @@ from src.ui_pending_places import (
     _last_clicked_location as _ui_last_clicked_location,
     render_pending_place_review_form as _render_pending_place_review_form,
 )
+from src.ui_geolocation import request_browser_location
 from src.ui_route_info import (
     coordinate_delta,
     render_compare_route_info,
     render_route_info_panel,
+)
+from src.user_location import (
+    is_low_accuracy,
+    is_near_nthu,
+    location_signature,
+    merge_geolocation_payload,
 )
 from src.utils import (
     format_distance,
@@ -95,7 +103,10 @@ ROUTE_CACHE_PATH = DATA_DIR / "route_cache.json"
 GEOCODE_CACHE_PATH = DATA_DIR / "geocode_cache.json"
 FORCED_RULES_PATH = DATA_DIR / "forced_route_rules.json"
 MANUAL_PLACES_PENDING_CSV = DATA_DIR / "manual_places_pending.csv"
-ROUTE_RESULT_VERSION = 2
+ROUTE_RESULT_VERSION = 3
+START_SOURCE_PLACE = "selected_place"
+START_SOURCE_GPS = "current_location"
+CURRENT_LOCATION_START_ID = "__current_location__"
 
 
 @st.cache_data(show_spinner=False)
@@ -134,10 +145,14 @@ def route_matches_selection(
     start_id: str,
     end_id: str,
     mode_id: str,
+    *,
+    start_signature: str | None = None,
 ) -> bool:
+    expected_signature = start_signature or f"place:{start_id}"
     return (
         isinstance(route_state, dict)
         and route_state.get("start_id") == start_id
+        and route_state.get("start_signature") == expected_signature
         and route_state.get("end_id") == end_id
         and route_state.get("mode_id") == mode_id
         and route_state.get("route_result_version") == ROUTE_RESULT_VERSION
@@ -185,6 +200,95 @@ def get_osrm_route_for_places(
         ignore_osrm_cache=ignore_osrm_cache,
         osrm_router=get_osrm_route,
     )
+
+
+def get_osrm_route_from_coordinates(
+    places_df: pd.DataFrame,
+    start_latitude: float,
+    start_longitude: float,
+    end_id: str,
+    *,
+    allow_live_osrm: bool,
+    route_cache_path: str | Path,
+    osrm_profile: str = "foot",
+    ignore_osrm_cache: bool = False,
+) -> dict[str, Any]:
+    return _get_osrm_route_from_coordinates(
+        places_df,
+        start_latitude,
+        start_longitude,
+        end_id,
+        allow_live_osrm=allow_live_osrm,
+        route_cache_path=route_cache_path,
+        osrm_profile=osrm_profile,
+        ignore_osrm_cache=ignore_osrm_cache,
+        osrm_router=get_osrm_route,
+    )
+
+
+def current_location_place(location: dict[str, Any] | None) -> dict[str, Any]:
+    """Build a session-only place-like object for existing map and info helpers."""
+    location = location or {}
+    return {
+        "id": CURRENT_LOCATION_START_ID,
+        "name": "My current location",
+        "display_name": "我的目前位置 / My current location",
+        "category": "current_location",
+        "latitude": location.get("latitude"),
+        "longitude": location.get("longitude"),
+        "accuracy_m": location.get("accuracy_m"),
+        "timestamp_ms": location.get("timestamp_ms"),
+        "location_stale": bool(location.get("location_stale")),
+        "source": "browser_geolocation",
+        "notes": "session_only",
+        "is_destination": "0",
+        "show_marker": "0",
+    }
+
+
+def store_geolocation_event(payload: dict[str, Any] | None) -> None:
+    """Store only a valid location; preserve it and mark stale after a failed refresh."""
+    if payload is None:
+        return
+    previous = st.session_state.get("current_location")
+    previous_signature = None
+    if isinstance(previous, dict):
+        try:
+            previous_signature = location_signature(
+                previous.get("latitude"), previous.get("longitude")
+            )
+        except ValueError:
+            previous_signature = None
+
+    merged = merge_geolocation_payload(
+        previous if isinstance(previous, dict) else None,
+        payload,
+    )
+    current = merged["location"]
+    if isinstance(current, dict):
+        st.session_state["current_location"] = current
+    if merged["updated"]:
+        st.session_state.pop("current_location_error", None)
+        next_signature = location_signature(
+            current["latitude"], current["longitude"]
+        )
+        if previous_signature != next_signature:
+            st.session_state.pop("route_state", None)
+        return
+
+    st.session_state["current_location_error"] = merged["error"]
+
+
+def geolocation_error_text(error: dict[str, Any]) -> str:
+    """Return a concise user-facing message for browser geolocation failures."""
+    messages = {
+        0: "This browser does not support geolocation or returned an invalid result.",
+        1: "Location permission was denied. Enable location access in the browser and try again.",
+        2: "Your current position is unavailable. Check device location services and try again.",
+        3: "The location request timed out. Move to an open area or try again.",
+    }
+    code = error.get("error_code")
+    return messages.get(code, str(error.get("error_message") or "Browser geolocation failed."))
 
 
 def get_campus_route(
@@ -751,14 +855,39 @@ def main() -> None:
                 on_rules_changed=_on_forced_rules_changed,
             )
 
+    start_source = st.radio(
+        "起點來源",
+        options=[START_SOURCE_PLACE, START_SOURCE_GPS],
+        format_func=lambda value: (
+            "從選擇的校園地點出發"
+            if value == START_SOURCE_PLACE
+            else "使用我的目前位置"
+        ),
+        horizontal=True,
+        key="route_start_source",
+    )
+
     controls = st.columns(3)
     with controls[0]:
-        start_id = st.selectbox(
-            "起點",
-            options=place_ids,
-            index=0,
-            format_func=lambda place_id: labels.get(place_id, place_id),
-        )
+        if start_source == START_SOURCE_PLACE:
+            start_id = st.selectbox(
+                "起點",
+                options=place_ids,
+                index=0,
+                format_func=lambda place_id: labels.get(place_id, place_id),
+            )
+        else:
+            start_id = CURRENT_LOCATION_START_ID
+            st.markdown("**起點**")
+            if selected_mode == OSRM_MODE_ID:
+                location_payload = request_browser_location(
+                    key="current_location_component",
+                    button_label="取得我的目前位置",
+                    requesting_label="正在向瀏覽器取得位置...",
+                )
+                store_geolocation_event(location_payload)
+            else:
+                st.warning("目前位置起點目前只支援 OSRM 路線模式。")
     with controls[1]:
         default_end_index = place_ids.index("engineering_1") if "engineering_1" in place_ids else 1
         end_id = st.selectbox(
@@ -770,36 +899,99 @@ def main() -> None:
     with controls[2]:
         st.write("")
         st.write("")
-        calculate_route = st.button("計算路線", type="primary", use_container_width=True)
+        current_location = st.session_state.get("current_location")
+        gps_start_ready = isinstance(current_location, dict)
+        calculate_route = st.button(
+            "計算路線",
+            type="primary",
+            width="stretch",
+            disabled=(
+                start_source == START_SOURCE_GPS
+                and (selected_mode != OSRM_MODE_ID or not gps_start_ready)
+            ),
+        )
 
-    start_place = get_place_by_id(places_df, start_id)
+    current_location = st.session_state.get("current_location")
+    if start_source == START_SOURCE_GPS:
+        start_place = current_location_place(
+            current_location if isinstance(current_location, dict) else None
+        )
+        labels[CURRENT_LOCATION_START_ID] = start_place["display_name"]
+        if selected_mode == OSRM_MODE_ID:
+            if isinstance(current_location, dict):
+                accuracy = current_location.get("accuracy_m")
+                accuracy_text = (
+                    f"，精確度約 {accuracy:.0f} 公尺" if accuracy is not None else ""
+                )
+                st.success(f"已取得目前位置{accuracy_text}。")
+                if current_location.get("location_stale"):
+                    st.warning("最新定位要求失敗；目前保留並使用先前的位置，該位置可能已過期。")
+                if is_low_accuracy(accuracy):
+                    st.warning("目前定位精確度較低，路線起點可能與實際位置有明顯差距。")
+                if not is_near_nthu(
+                    current_location.get("latitude"), current_location.get("longitude")
+                ):
+                    st.warning("目前位置距離清大校園較遠，OSRM 仍可嘗試規劃步行路線。")
+            else:
+                st.info("請先按下「取得我的目前位置」，允許瀏覽器定位後再計算路線。")
+            location_error = st.session_state.get("current_location_error")
+            if isinstance(location_error, dict):
+                st.error(geolocation_error_text(location_error))
+    else:
+        start_place = get_place_by_id(places_df, start_id)
+
     end_place = get_place_by_id(places_df, end_id)
 
-    if start_id == end_id:
+    same_place = start_source == START_SOURCE_PLACE and start_id == end_id
+    if same_place:
         st.warning("起點與終點相同，請選擇不同地點。")
 
     if out_of_bounds:
         st.warning("偵測到部分座標超出清大校園範圍，地圖仍可顯示，但建議先人工修正。")
 
     if calculate_route:
-        if start_id == end_id:
+        if same_place:
             st.warning("起點與終點相同，因此不計算路線。")
+        elif start_source == START_SOURCE_GPS and selected_mode != OSRM_MODE_ID:
+            st.warning("目前位置起點目前只支援 OSRM 路線模式。")
+        elif start_source == START_SOURCE_GPS and not isinstance(current_location, dict):
+            st.warning("尚未取得有效的目前位置，因此無法計算路線。")
         else:
             with st.spinner("正在計算路線..."):
-                route_result = calculate_route_for_mode(
-                    selected_mode,
-                    places_df,
-                    edges_df,
-                    start_id,
-                    end_id,
-                    allow_live_osrm=allow_live_osrm,
-                    forced_rules_path=FORCED_RULES_PATH,
-                    route_cache_path=ROUTE_CACHE_PATH,
-                    osrm_profile=osrm_profile,
-                    ignore_osrm_cache=ignore_osrm_cache,
+                if start_source == START_SOURCE_GPS:
+                    route_result = get_osrm_route_from_coordinates(
+                        places_df,
+                        current_location["latitude"],
+                        current_location["longitude"],
+                        end_id,
+                        allow_live_osrm=allow_live_osrm,
+                        route_cache_path=ROUTE_CACHE_PATH,
+                        osrm_profile=osrm_profile,
+                        ignore_osrm_cache=ignore_osrm_cache,
+                    )
+                else:
+                    route_result = calculate_route_for_mode(
+                        selected_mode,
+                        places_df,
+                        edges_df,
+                        start_id,
+                        end_id,
+                        allow_live_osrm=allow_live_osrm,
+                        forced_rules_path=FORCED_RULES_PATH,
+                        route_cache_path=ROUTE_CACHE_PATH,
+                        osrm_profile=osrm_profile,
+                        ignore_osrm_cache=ignore_osrm_cache,
+                    )
+            start_signature = (
+                location_signature(
+                    current_location["latitude"], current_location["longitude"]
                 )
+                if start_source == START_SOURCE_GPS
+                else f"place:{start_id}"
+            )
             st.session_state["route_state"] = {
                 "start_id": start_id,
+                "start_signature": start_signature,
                 "end_id": end_id,
                 "mode_id": selected_mode,
                 "route_result_version": ROUTE_RESULT_VERSION,
@@ -813,12 +1005,27 @@ def main() -> None:
                     "Demo mode 找不到這組 OSRM 路線快取。若現場網路可用，請勾選"
                     "「OSRM 快取不存在時允許呼叫 OSRM」後重新計算。"
                 )
+            elif "gps_live_osrm_required" in str(route_result["error"]):
+                st.warning("目前位置路線不會使用共享快取；請允許 live OSRM 後重新計算。")
             else:
                 st.error(f"路線查詢失敗：{route_result['error']}")
 
     route_state = st.session_state.get("route_state")
     active_route = None
-    if route_matches_selection(route_state, start_id, end_id, selected_mode):
+    current_start_signature = (
+        location_signature(
+            current_location["latitude"], current_location["longitude"]
+        )
+        if start_source == START_SOURCE_GPS and isinstance(current_location, dict)
+        else f"place:{start_id}"
+    )
+    if route_matches_selection(
+        route_state,
+        start_id,
+        end_id,
+        selected_mode,
+        start_signature=current_start_signature,
+    ):
         active_route = route_state.get("result")
 
     map_obj = build_route_map(

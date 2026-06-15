@@ -215,6 +215,12 @@ def render_route_info_panel(
 ) -> None:
     st.markdown("### 路線資訊")
     st.write(f"起點：{labels[start_id]}")
+    if start_place.get("source") == "browser_geolocation":
+        accuracy = parse_coordinate(start_place.get("accuracy_m"))
+        if accuracy is not None:
+            st.write(f"定位精確度：約 {accuracy:.0f} 公尺")
+        if start_place.get("location_stale"):
+            st.warning("目前顯示的是先前取得的位置，可能已過期。")
     st.write(f"終點：{labels[end_id]}")
     st.write(f"模式：{mode_labels[selected_mode]}")
 
