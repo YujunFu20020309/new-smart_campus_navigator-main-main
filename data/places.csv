@@ -10,7 +10,7 @@ shui_mu_student_center,Shui Mu Student Center,水木生活中心 / Shui Mu Stude
 feng_yun_building,Feng Yun Building,風雲樓 / Feng Yun Building,building,24.792253,120.994596,manual,verified,1,1
 sports_field,Sports Field,運動場 / Sports Field,landmark,24.794118,120.990103,manual,verified,1,1
 eecs_building,College of Electrical Engineering and Computer Science,資電館 / College of EECS,building,24.795218,120.992131,manual,verified,1,1
-Technology_Management,TSMC Building,台積館/TSMC Building,building,24.78672,120.988518,manual,verified,1,1
+Technology_Management,TSMC Building,台積館 / TSMC Building,building,24.78672,120.988518,manual,verified,1,1
 campus_security_office,駐警隊,駐警隊,building,24.791654,120.99182,manual,manual_added,1,1
 red_bridge_right,學思路小紅橋,學思路小紅橋,road_node,24.795409,120.993118,manual,manual_added,0,0
 red_bridge_left,行勝路小紅橋,行勝路小紅橋,road_node,24.795467,120.99277,manual,manual_added,0,0
@@ -38,3 +38,17 @@ eecs_building_front,資電館前人行道,資電館前人行道,road_node,24.794
 teaching_building,教育館,教育館,building,24.795737,120.99384,manual,manual_added,1,1
 e3,工程三館,工程三館,building,24.796406,120.992657,manual,manual_added,1,1
 test1,同位素館,同位素館,building,24.789267,120.992163,manual,manual_added,1,1
+general_building_3,第三行政大樓 / General Building 3,第三行政大樓 / General Building 3,building,24.795023,120.993521,manual,manual_added,1,1
+physics_building,物理館 / Physics Building,物理館 / Physics Building,building,24.794225,120.992442,manual,manual_added,1,1
+nthu_garden,清華園 / NTHU Garden,清華園 / NTHU Garden,building,24.794653,120.993982,manual,manual_added,1,1
+scientific_instrument_center,科儀中心 / Scientific Instrument Center,科儀中心 / Scientific Instrument Center,building,24.794432,120.996214,manual,manual_added,1,1
+general_building_4,第四綜合大樓 / General Building 4,第四綜合大樓 / General Building 4,building,24.795294,120.996989,manual,manual_added,1,1
+center_of_innovative_incubator,創新育成中心 / Center of Innovative Incubator,創新育成中心 / Center of Innovative Incubator,building,24.795238,120.996538,manual,manual_added,1,1
+familymart_nthu_kinda,全家便利商店清大金大店 / Family Mart NTHU Kinda,全家便利商店清大金大店 / Family Mart NTHU Kinda,building,24.795598,120.996586,manual,manual_added,1,1
+nthu_post_office,清大郵局 / NTHU Post Office,清大郵局 / NTHU Post Office,building,24.795547,120.997075,manual,manual_added,1,1
+chemistry_building,化學館 / Chemistry Building,化學館 / Chemistry Building,building,24.79617,120.995851,manual,manual_added,1,1
+chemistry_and_power_mechanical_engineering_building,動機化學實驗室 / Chemistry and Power Mechanical Engineering Building,動機化學實驗室 / Chemistry and Power Mechanical Engineering Building,building,24.796567,120.995318,manual,manual_added,1,1
+motorcycle_parking_ramp,立體機車塔 / Motorcycle Parking Ramp,立體機車塔 / Motorcycle Parking Ramp,building,24.797186,120.995573,manual,manual_added,1,1
+swimming_pool,游泳池 / Swimming Pool,游泳池 / Swimming Pool,building,24.795004,120.991549,manual,manual_added,1,1
+table_tennis_hall,桌球館 / Table Tennis Hall,桌球館 / Table Tennis Hall,building,24.794256,120.991576,manual,manual_added,1,1
+nthu_hall_of_fame,清華名人堂 / NTHU Hall of Fame,清華名人堂 / NTHU Hall of Fame,building,24.794256,120.991576,manual,manual_added,1,1

@@ -4,6 +4,17 @@
 
 目前沒有串接天氣 API。雨天路線由使用者在側邊欄手動選擇。
 
+### 線上展示網站
+
+本專案已部署於 Streamlit Community Cloud，可透過以下連結直接使用：
+
+https://nthu-smart-campus-navigator.streamlit.app
+
+
+線上版本提供清大校園地點選擇、路線計算、互動式地圖顯示，以及 OSRM / 校園路網路線展示。此網站為課程專案展示版本，路線資料以專案內建資料與 OpenStreetMap / OSRM 回傳結果為基礎，不代表官方校園導航服務。
+
+線上部署可透過 `PUBLIC_SITE` 設定啟用公開網站模式。公開網站模式下，若 OSRM 快取不存在，系統會自動允許 live OSRM request，並隱藏本機開發用的「OSRM 快取不存在時允許呼叫 OSRM」checkbox。
+
 ## 主要功能
 
 - Streamlit 互動式介面，選擇起點、終點與路線模式後顯示地圖和路線資訊。
@@ -15,6 +26,7 @@
 - Folium 地圖顯示起終點 marker、路線 polyline 與比較模式的雙路線樣式。
 - 地圖點選新增地點模式，可從 Folium 點擊取得座標，先寫入 pending 待審核清單。
 - 側邊欄提供資料品質檢查、座標補齊、校園邊資料管理與強制路線規則管理。
+- 公開網站模式會自動允許 OSRM live request，並隱藏本機開發用的 OSRM live request checkbox。
 
 ## 路線模式
 
@@ -414,6 +426,36 @@ python tools/merge_pending_places.py
 - 若需要重新呼叫 OSRM，可勾選「OSRM 快取不存在時允許呼叫 OSRM」或「忽略快取，重新呼叫 OSRM」。
 
 `data/route_cache.json` 使用 walking v2 key 格式，OSRM profile 固定為 `foot`。
+
+## 公開網站模式與 OSRM live request
+
+公開部署時可啟用公開網站模式，讓一般使用者不需要看到本機開發用的 OSRM live request checkbox。
+
+啟用方式：
+
+1. 優先設定環境變數 `PUBLIC_SITE`。
+2. 若沒有環境變數，程式會讀取 Streamlit secrets 的 `PUBLIC_SITE`。
+3. `PUBLIC_SITE` 的值若為 `true`、`1`、`yes`、`on`，就會視為公開網站模式。
+4. 未設定時預設為本機開發模式。
+
+Streamlit Community Cloud 可在 Settings -> Secrets 加入：
+
+```toml
+PUBLIC_SITE = true
+```
+
+公開網站模式下：
+
+- sidebar 不顯示「OSRM 快取不存在時允許呼叫 OSRM」checkbox。
+- `allow_live_osrm` 直接設為 `True`。
+- sidebar 不顯示額外的公開網站模式提示 caption。
+- 不改變 OSRM / Campus / Rain / Compare 的 route calculation 行為。
+
+本機開發模式下：
+
+- 保留原本 Demo mode toggle。
+- 保留原本「OSRM 快取不存在時允許呼叫 OSRM」checkbox。
+- checkbox 仍維持 `value=not demo_mode` 的原本行為。
 
 ## 座標與 geometry 注意事項
 
