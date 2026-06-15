@@ -326,9 +326,12 @@ def find_nearest_reachable_node(
         "latitude": node_lat,
         "longitude": node_lon,
         "distance_m": distance_m,
+        "max_distance_m": max_distance,
+        "failure_reason": None,
         "error": None,
     }
     if not result["success"]:
+        result["failure_reason"] = "max_distance_exceeded"
         result["error"] = (
             f"Nearest reachable campus graph node is {distance_m:.0f} m away, "
             f"exceeding the {max_distance:.0f} m snap limit."

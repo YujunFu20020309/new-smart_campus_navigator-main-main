@@ -129,9 +129,41 @@ def render_active_route_summary(active_route: dict[str, Any] | None) -> None:
                     f"geometry_points={segment.get('geometry_point_count', 0)}"
                 )
     elif active_route and active_route.get("error"):
-        st.error(active_route["error"])
+        st.error(active_route.get("user_message") or active_route["error"])
     else:
         st.info("請選擇起點與終點後按下「計算路線」。")
+
+
+def render_gps_campus_snap_debug(
+    active_route: dict[str, Any] | None,
+    *,
+    end_id: str,
+    enabled: bool,
+) -> bool:
+    """Render detailed snap failure metadata only under the existing debug flag."""
+    if not (
+        enabled
+        and active_route
+        and active_route.get("source") == "gps_campus_graph"
+        and not active_route.get("success")
+    ):
+        return False
+
+    with st.expander("GPS Campus Snap Debug"):
+        st.write(f"fallback_reason：{active_route.get('fallback_reason')}")
+        st.write(f"snap_failure_reason：{active_route.get('snap_failure_reason')}")
+        st.write(f"nearest node id：{active_route.get('snapped_start_id')}")
+        st.write(f"nearest node name：{active_route.get('snapped_start_name')}")
+        st.write(f"snap distance_m：{active_route.get('snap_distance_m')}")
+        st.write(f"snap limit_m：{active_route.get('snap_limit_m')}")
+        st.write(
+            "nearest node coordinate："
+            f"lat={active_route.get('snapped_start_latitude')}, "
+            f"lon={active_route.get('snapped_start_longitude')}"
+        )
+        st.write(f"destination id：{end_id}")
+        st.code(active_route.get("error") or "No technical error detail")
+    return True
 
 
 def render_osrm_debug(
@@ -222,6 +254,7 @@ def render_route_info_panel(
     osrm_profile: str,
     demo_mode: bool,
     allow_live_osrm: bool,
+    debug_enabled: bool = False,
 ) -> None:
     st.markdown("### 路線資訊")
     st.write(f"起點：{labels[start_id]}")
@@ -242,6 +275,12 @@ def render_route_info_panel(
         render_compare_route_info(active_route)
     else:
         render_active_route_summary(active_route)
+
+    render_gps_campus_snap_debug(
+        active_route,
+        end_id=end_id,
+        enabled=debug_enabled,
+    )
 
     render_osrm_debug(
         start_id=start_id,

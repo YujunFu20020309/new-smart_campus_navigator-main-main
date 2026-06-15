@@ -1097,7 +1097,7 @@ def main() -> None:
             elif "gps_live_osrm_required" in str(route_result["error"]):
                 st.warning("目前位置路線不會使用共享快取；請允許 live OSRM 後重新計算。")
             elif route_result.get("suggested_mode") == OSRM_MODE_ID:
-                st.warning(f"{route_result['error']} 建議切換到 OSRM 路線模式。")
+                st.warning(route_result.get("user_message") or route_result["error"])
             else:
                 st.error(f"路線查詢失敗：{route_result['error']}")
 
@@ -1163,6 +1163,7 @@ def main() -> None:
             osrm_profile=osrm_profile,
             demo_mode=demo_mode,
             allow_live_osrm=allow_live_osrm,
+            debug_enabled=show_debug_nodes,
         )
 
 

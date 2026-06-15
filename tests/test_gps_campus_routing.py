@@ -142,7 +142,10 @@ def test_nearest_reachable_node_enforces_max_snap_distance():
 
     assert result["success"] is False
     assert result["node_id"] == "far"
+    assert result["node_name"] == "Far"
     assert result["distance_m"] > 250
+    assert result["max_distance_m"] == 250
+    assert result["failure_reason"] == "max_distance_exceeded"
     assert "250 m snap limit" in result["error"]
 
 
@@ -174,6 +177,56 @@ def test_gps_campus_route_fails_gracefully_when_no_reachable_node_exists():
     assert result["fallback_reason"] == "campus_snap_failed"
     assert result["suggested_mode"] == "osrm"
     assert "Use OSRM mode instead" in result["error"]
+    router.assert_not_called()
+
+
+def test_gps_campus_route_exposes_clear_snap_distance_metadata():
+    graph = _service_graph()
+    snapper = Mock(
+        return_value={
+            "success": False,
+            "node_id": "reachable_far",
+            "node_name": "Reachable Far Node",
+            "latitude": 24.7999,
+            "longitude": 120.9937,
+            "distance_m": 452.4,
+            "max_distance_m": 250.0,
+            "failure_reason": "max_distance_exceeded",
+            "error": (
+                "Nearest reachable campus graph node is 452 m away, "
+                "exceeding the 250 m snap limit."
+            ),
+        }
+    )
+    router = Mock()
+
+    result = get_gps_campus_route(
+        pd.DataFrame(),
+        pd.DataFrame(),
+        GPS_LAT,
+        GPS_LON,
+        "destination",
+        accuracy_m=15,
+        allow_live_osrm=True,
+        route_cache_path="unused.json",
+        campus_graph_builder=Mock(return_value=graph),
+        reachable_node_finder=snapper,
+        osrm_router=router,
+    )
+
+    assert result["success"] is False
+    assert result["fallback_reason"] == "snap_distance_exceeded"
+    assert result["snap_failure_reason"] == "max_distance_exceeded"
+    assert result["snapped_start_id"] == "reachable_far"
+    assert result["snapped_start_name"] == "Reachable Far Node"
+    assert result["snap_distance_m"] == 452.4
+    assert result["snap_limit_m"] == 250.0
+    assert "Reachable Far Node" in result["user_message"]
+    assert "reachable_far" in result["user_message"]
+    assert "452 公尺" in result["user_message"]
+    assert "250 公尺" in result["user_message"]
+    assert "OSRM" in result["user_message"]
+    assert "節點與路段" in result["user_message"]
     router.assert_not_called()
 
 

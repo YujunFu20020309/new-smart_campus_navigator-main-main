@@ -263,6 +263,25 @@ def _gps_campus_failure(
     return result
 
 
+def _snap_distance_user_message(snap: dict[str, Any]) -> str:
+    node_id = str(snap.get("node_id") or "unknown")
+    node_name = str(snap.get("node_name") or "").strip()
+    node_label = (
+        f"「{node_name}」（ID: {node_id}）"
+        if node_name and node_name != node_id
+        else f"ID: {node_id}"
+    )
+    distance_m = float(snap.get("distance_m") or 0.0)
+    snap_limit_m = float(
+        snap.get("max_distance_m") or DEFAULT_MAX_GPS_SNAP_DISTANCE_M
+    )
+    return (
+        f"目前位置距離最近可接入的校園路網節點 {node_label} 約 {distance_m:.0f} 公尺，"
+        f"超過目前 {snap_limit_m:.0f} 公尺的接入限制。請改用 OSRM 路線，或在目前位置附近"
+        "補充可連通的校園路網節點與路段。"
+    )
+
+
 def _merge_folium_coordinates(*segments: Any) -> list[list[float]]:
     merged: list[list[float]] = []
     for segment in segments:
@@ -374,14 +393,30 @@ def get_gps_campus_route(
             warning=warning,
         )
     if not snap.get("success"):
+        snap_limit_m = snap.get("max_distance_m", max_snap_distance_m)
+        snap_failure_reason = snap.get("failure_reason")
+        if snap_failure_reason == "max_distance_exceeded":
+            user_message = _snap_distance_user_message(snap)
+            fallback_reason = "snap_distance_exceeded"
+        else:
+            user_message = (
+                "目前位置無法接入可到達目的地的校園路網。請改用 OSRM 路線，或補充目前位置"
+                "附近的校園路網節點與路段。"
+            )
+            fallback_reason = "campus_snap_failed"
         return _gps_campus_failure(
             f"Campus snapping failed: {snap.get('error') or 'No reachable node found.'} "
             "Use OSRM mode instead.",
-            "campus_snap_failed",
+            fallback_reason,
             warning=warning,
             snapped_start_id=snap.get("node_id"),
             snapped_start_name=snap.get("node_name"),
             snap_distance_m=snap.get("distance_m"),
+            snap_limit_m=snap_limit_m,
+            snapped_start_latitude=snap.get("latitude"),
+            snapped_start_longitude=snap.get("longitude"),
+            user_message=user_message,
+            snap_failure_reason=snap_failure_reason,
         )
 
     snapped_start_id = snap["node_id"]
