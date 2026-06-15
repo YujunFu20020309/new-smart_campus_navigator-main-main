@@ -77,6 +77,16 @@ def render_active_route_summary(active_route: dict[str, Any] | None) -> None:
             st.write("資料來源：hybrid_forced_route")
             st.write(f"強制規則：{active_route.get('rule_name', '')}")
             st.write(f"方向：{active_route.get('direction', '')}")
+        elif active_route.get("source") == "gps_campus_graph":
+            st.write("資料來源：實驗性 GPS connector + campus graph")
+            st.write(
+                f"接入節點：{active_route.get('snapped_start_name') or active_route.get('snapped_start_id')}"
+            )
+            st.write(f"直線 snap 距離：{format_distance(active_route.get('snap_distance_m'))}")
+            st.write(f"OSRM connector：{format_distance(active_route.get('connector_distance_m'))}")
+            st.write(f"校園 graph：{format_distance(active_route.get('campus_distance_m'))}")
+            if active_route.get("warning"):
+                st.warning(active_route["warning"])
         else:
             st.write(f"資料來源：{active_route.get('source', '')}")
         if active_route.get("source") in {

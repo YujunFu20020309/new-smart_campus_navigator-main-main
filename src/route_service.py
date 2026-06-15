@@ -5,11 +5,22 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from src.campus_graph import build_campus_graph, compute_campus_route
+from src.campus_graph import (
+    DEFAULT_MAX_GPS_SNAP_DISTANCE_M,
+    build_campus_graph,
+    compute_campus_route,
+    find_nearest_reachable_node,
+    path_to_route_result,
+)
 from src.forced_routes import match_forced_route_rule, route_with_forced_rule
 from src.route_modes import CAMPUS_MODE_ID, COMPARE_MODE_ID, OSRM_MODE_ID, RAIN_MODE_ID
 from src.routing_osrm import get_osrm_route
-from src.user_location import validate_coordinates
+from src.user_location import (
+    is_low_accuracy,
+    is_near_nthu,
+    normalize_accuracy,
+    validate_coordinates,
+)
 from src.utils import get_place_by_id, parse_coordinate, place_has_coordinates
 
 
@@ -227,6 +238,275 @@ def get_osrm_route_from_coordinates(
     if isinstance(result, dict):
         result["gps_origin"] = True
     return result
+
+
+def _gps_campus_failure(
+    error: str,
+    fallback_reason: str,
+    **metadata: Any,
+) -> dict[str, Any]:
+    result = route_failure("gps_campus_graph", CAMPUS_MODE_ID, error)
+    result.update(
+        {
+            "gps_origin": True,
+            "experimental": True,
+            "fallback_reason": fallback_reason,
+            "suggested_mode": OSRM_MODE_ID,
+            "snapped_start_id": None,
+            "snapped_start_name": None,
+            "snap_distance_m": None,
+            "connector_distance_m": None,
+            "campus_distance_m": None,
+            **metadata,
+        }
+    )
+    return result
+
+
+def _merge_folium_coordinates(*segments: Any) -> list[list[float]]:
+    merged: list[list[float]] = []
+    for segment in segments:
+        if not isinstance(segment, list):
+            continue
+        for point in segment:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                latitude, longitude = validate_coordinates(point[0], point[1])
+            except ValueError:
+                continue
+            normalized = [latitude, longitude]
+            if not merged or merged[-1] != normalized:
+                merged.append(normalized)
+    return merged
+
+
+def get_gps_campus_route(
+    places_df: pd.DataFrame,
+    edges_df: pd.DataFrame | None,
+    start_latitude: Any,
+    start_longitude: Any,
+    end_id: str,
+    *,
+    accuracy_m: Any = None,
+    allow_live_osrm: bool,
+    route_cache_path: str | Path,
+    osrm_profile: str = "foot",
+    ignore_osrm_cache: bool = False,
+    max_snap_distance_m: float = DEFAULT_MAX_GPS_SNAP_DISTANCE_M,
+    campus_graph_builder: Callable[..., Any] | None = None,
+    reachable_node_finder: Callable[..., dict[str, Any]] | None = None,
+    campus_route_computer: Callable[..., dict[str, Any]] | None = None,
+    osrm_router: Callable[..., dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Join a session-only GPS origin to a reachable campus graph route."""
+    campus_graph_builder = build_campus_graph if campus_graph_builder is None else campus_graph_builder
+    reachable_node_finder = (
+        find_nearest_reachable_node
+        if reachable_node_finder is None
+        else reachable_node_finder
+    )
+    campus_route_computer = (
+        compute_campus_route if campus_route_computer is None else campus_route_computer
+    )
+    osrm_router = get_osrm_route if osrm_router is None else osrm_router
+
+    try:
+        start_lat, start_lon = validate_coordinates(start_latitude, start_longitude)
+    except ValueError as exc:
+        return _gps_campus_failure(
+            f"Invalid GPS coordinate: {exc} Use OSRM mode instead.",
+            "invalid_gps_coordinate",
+        )
+
+    if not is_near_nthu(start_lat, start_lon):
+        return _gps_campus_failure(
+            "Current location does not appear to be near NTHU. Use OSRM mode instead.",
+            "outside_nthu_area",
+        )
+
+    normalized_accuracy = normalize_accuracy(accuracy_m)
+    if is_low_accuracy(normalized_accuracy):
+        return _gps_campus_failure(
+            "GPS accuracy is too low for experimental campus snapping. Use OSRM mode instead.",
+            "gps_accuracy_too_low",
+        )
+    warning = None
+    if normalized_accuracy is None:
+        warning = "GPS accuracy is unavailable; campus snapping used the reported coordinate only."
+
+    if edges_df is None:
+        return _gps_campus_failure(
+            "Campus graph data is unavailable. Use OSRM mode instead.",
+            "campus_edges_unavailable",
+            warning=warning,
+        )
+    if not allow_live_osrm and not ignore_osrm_cache:
+        return _gps_campus_failure(
+            "A live OSRM request is required for the GPS-to-campus connector. "
+            "GPS campus routes never use the persistent route cache; use OSRM mode instead.",
+            "gps_live_osrm_required",
+            warning=warning,
+        )
+
+    try:
+        graph = campus_graph_builder(places_df, edges_df)
+    except Exception as exc:
+        return _gps_campus_failure(
+            f"Failed to build the campus graph: {type(exc).__name__}: {exc}. "
+            "Use OSRM mode instead.",
+            "campus_graph_build_failed",
+            warning=warning,
+        )
+
+    try:
+        snap = reachable_node_finder(
+            graph,
+            start_lat,
+            start_lon,
+            end_id,
+            max_distance_m=max_snap_distance_m,
+        )
+    except Exception as exc:
+        return _gps_campus_failure(
+            f"Campus snapping failed: {type(exc).__name__}: {exc}. Use OSRM mode instead.",
+            "campus_snap_failed",
+            warning=warning,
+        )
+    if not snap.get("success"):
+        return _gps_campus_failure(
+            f"Campus snapping failed: {snap.get('error') or 'No reachable node found.'} "
+            "Use OSRM mode instead.",
+            "campus_snap_failed",
+            warning=warning,
+            snapped_start_id=snap.get("node_id"),
+            snapped_start_name=snap.get("node_name"),
+            snap_distance_m=snap.get("distance_m"),
+        )
+
+    snapped_start_id = snap["node_id"]
+    try:
+        connector = osrm_router(
+            start_lat,
+            start_lon,
+            snap["latitude"],
+            snap["longitude"],
+            profile="foot",
+            cache_path=route_cache_path,
+            allow_network=True,
+            ignore_cache=True,
+            persist_cache=False,
+        )
+    except Exception as exc:
+        return _gps_campus_failure(
+            f"GPS connector routing failed: {type(exc).__name__}: {exc}. "
+            "Use OSRM mode instead.",
+            "connector_route_failed",
+            warning=warning,
+            snapped_start_id=snapped_start_id,
+            snapped_start_name=snap.get("node_name"),
+            snap_distance_m=snap.get("distance_m"),
+        )
+    if not connector.get("success"):
+        return _gps_campus_failure(
+            f"GPS connector routing failed: {connector.get('error') or 'OSRM failed.'} "
+            "Use OSRM mode instead.",
+            "connector_route_failed",
+            warning=warning,
+            snapped_start_id=snapped_start_id,
+            snapped_start_name=snap.get("node_name"),
+            snap_distance_m=snap.get("distance_m"),
+        )
+
+    try:
+        if snapped_start_id == end_id:
+            campus_route = path_to_route_result(
+                [snapped_start_id],
+                graph,
+                places_df,
+                mode=CAMPUS_MODE_ID,
+                cost=0.0,
+            )
+        else:
+            campus_route = campus_route_computer(
+                graph,
+                snapped_start_id,
+                end_id,
+                mode=CAMPUS_MODE_ID,
+            )
+    except Exception as exc:
+        return _gps_campus_failure(
+            f"Campus graph routing failed after snapping: {type(exc).__name__}: {exc}. "
+            "Use OSRM mode instead.",
+            "campus_route_failed",
+            warning=warning,
+            snapped_start_id=snapped_start_id,
+            snapped_start_name=snap.get("node_name"),
+            snap_distance_m=snap.get("distance_m"),
+            connector_distance_m=connector.get("distance_m"),
+        )
+    if not campus_route.get("success"):
+        return _gps_campus_failure(
+            f"Campus graph routing failed after snapping: "
+            f"{campus_route.get('error') or 'No campus path found.'} Use OSRM mode instead.",
+            "campus_route_failed",
+            warning=warning,
+            snapped_start_id=snapped_start_id,
+            snapped_start_name=snap.get("node_name"),
+            snap_distance_m=snap.get("distance_m"),
+            connector_distance_m=connector.get("distance_m"),
+        )
+
+    connector_distance_m = float(connector.get("distance_m") or 0.0)
+    campus_distance_m = float(campus_route.get("distance_m") or 0.0)
+    connector_duration_s = float(connector.get("duration_s") or 0.0)
+    campus_duration_s = float(campus_route.get("duration_s") or 0.0)
+    coordinates = _merge_folium_coordinates(
+        connector.get("folium_coordinates"),
+        campus_route.get("folium_coordinates"),
+    )
+    return {
+        "success": True,
+        "distance_m": connector_distance_m + campus_distance_m,
+        "duration_s": connector_duration_s + campus_duration_s,
+        "duration_source": "osrm_connector_plus_campus_estimate",
+        "cost": float(campus_route.get("cost") or 0.0) + connector_distance_m,
+        "folium_coordinates": coordinates,
+        "geometry_geojson": {
+            "type": "LineString",
+            "coordinates": [[point[1], point[0]] for point in coordinates],
+        },
+        "path_ids": campus_route.get("path_ids", []),
+        "path_names": campus_route.get("path_names", []),
+        "edge_segments": [
+            {
+                "from_id": "__current_location__",
+                "to_id": snapped_start_id,
+                "road_name": "GPS to campus graph connector",
+                "routing_source": "osrm",
+                "ignore_osrm": True,
+                "verified": False,
+                "distance_m": connector_distance_m,
+                "geometry_point_count": len(connector.get("folium_coordinates") or []),
+                "type": "osrm_connector",
+            },
+            *campus_route.get("edge_segments", []),
+        ],
+        "source": "gps_campus_graph",
+        "mode": CAMPUS_MODE_ID,
+        "error": None,
+        "cache_hit": False,
+        "gps_origin": True,
+        "experimental": True,
+        "snapped_start_id": snapped_start_id,
+        "snapped_start_name": snap.get("node_name"),
+        "snap_distance_m": float(snap["distance_m"]),
+        "connector_distance_m": connector_distance_m,
+        "campus_distance_m": campus_distance_m,
+        "warning": warning,
+        "fallback_reason": None,
+        "suggested_mode": None,
+    }
 
 
 def get_campus_route(

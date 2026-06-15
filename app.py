@@ -49,6 +49,7 @@ from src.route_service import (
     calculate_route_for_mode as _calculate_route_for_mode,
     get_campus_route as _get_campus_route,
     get_campus_route_features as _get_campus_route_features,
+    get_gps_campus_route as _get_gps_campus_route,
     get_osrm_route_for_places as _get_osrm_route_for_places,
     get_osrm_route_from_coordinates as _get_osrm_route_from_coordinates,
     get_rain_route as _get_rain_route,
@@ -103,7 +104,7 @@ ROUTE_CACHE_PATH = DATA_DIR / "route_cache.json"
 GEOCODE_CACHE_PATH = DATA_DIR / "geocode_cache.json"
 FORCED_RULES_PATH = DATA_DIR / "forced_route_rules.json"
 MANUAL_PLACES_PENDING_CSV = DATA_DIR / "manual_places_pending.csv"
-ROUTE_RESULT_VERSION = 3
+ROUTE_RESULT_VERSION = 4
 START_SOURCE_PLACE = "selected_place"
 START_SOURCE_GPS = "current_location"
 CURRENT_LOCATION_START_ID = "__current_location__"
@@ -222,6 +223,36 @@ def get_osrm_route_from_coordinates(
         route_cache_path=route_cache_path,
         osrm_profile=osrm_profile,
         ignore_osrm_cache=ignore_osrm_cache,
+        osrm_router=get_osrm_route,
+    )
+
+
+def get_gps_campus_route(
+    places_df: pd.DataFrame,
+    edges_df: pd.DataFrame | None,
+    start_latitude: float,
+    start_longitude: float,
+    end_id: str,
+    *,
+    accuracy_m: float | None,
+    allow_live_osrm: bool,
+    route_cache_path: str | Path,
+    osrm_profile: str = "foot",
+    ignore_osrm_cache: bool = False,
+) -> dict[str, Any]:
+    return _get_gps_campus_route(
+        places_df,
+        edges_df,
+        start_latitude,
+        start_longitude,
+        end_id,
+        accuracy_m=accuracy_m,
+        allow_live_osrm=allow_live_osrm,
+        route_cache_path=route_cache_path,
+        osrm_profile=osrm_profile,
+        ignore_osrm_cache=ignore_osrm_cache,
+        campus_graph_builder=build_campus_graph,
+        campus_route_computer=compute_campus_route,
         osrm_router=get_osrm_route,
     )
 
@@ -866,6 +897,22 @@ def main() -> None:
         horizontal=True,
         key="route_start_source",
     )
+    gps_campus_experimental_enabled = False
+    if start_source == START_SOURCE_GPS and selected_mode == CAMPUS_MODE_ID:
+        gps_campus_experimental_enabled = st.checkbox(
+            "實驗性：啟用 GPS 校園路線",
+            value=False,
+            help=(
+                "先用無持久快取的 OSRM connector 接到 250 公尺內可到達終點的校園節點，"
+                "再使用 campus graph。失敗時請改用 OSRM 模式。"
+            ),
+        )
+        if not gps_campus_experimental_enabled:
+            st.info("GPS 校園路線預設關閉；勾選實驗功能後才會允許計算。")
+
+    gps_mode_supported = selected_mode == OSRM_MODE_ID or (
+        selected_mode == CAMPUS_MODE_ID and gps_campus_experimental_enabled
+    )
 
     controls = st.columns(3)
     with controls[0]:
@@ -879,15 +926,15 @@ def main() -> None:
         else:
             start_id = CURRENT_LOCATION_START_ID
             st.markdown("**起點**")
-            if selected_mode == OSRM_MODE_ID:
+            if gps_mode_supported:
                 location_payload = request_browser_location(
                     key="current_location_component",
                     button_label="取得我的目前位置",
                     requesting_label="正在向瀏覽器取得位置...",
                 )
                 store_geolocation_event(location_payload)
-            else:
-                st.warning("目前位置起點目前只支援 OSRM 路線模式。")
+            elif selected_mode != CAMPUS_MODE_ID:
+                st.warning("目前位置起點不支援雨天或路線比較模式。")
     with controls[1]:
         default_end_index = place_ids.index("engineering_1") if "engineering_1" in place_ids else 1
         end_id = st.selectbox(
@@ -901,13 +948,29 @@ def main() -> None:
         st.write("")
         current_location = st.session_state.get("current_location")
         gps_start_ready = isinstance(current_location, dict)
+        campus_gps_location_blocked = (
+            start_source == START_SOURCE_GPS
+            and selected_mode == CAMPUS_MODE_ID
+            and gps_start_ready
+            and (
+                is_low_accuracy(current_location.get("accuracy_m"))
+                or not is_near_nthu(
+                    current_location.get("latitude"),
+                    current_location.get("longitude"),
+                )
+            )
+        )
         calculate_route = st.button(
             "計算路線",
             type="primary",
             width="stretch",
             disabled=(
                 start_source == START_SOURCE_GPS
-                and (selected_mode != OSRM_MODE_ID or not gps_start_ready)
+                and (
+                    not gps_mode_supported
+                    or not gps_start_ready
+                    or campus_gps_location_blocked
+                )
             ),
         )
 
@@ -917,7 +980,7 @@ def main() -> None:
             current_location if isinstance(current_location, dict) else None
         )
         labels[CURRENT_LOCATION_START_ID] = start_place["display_name"]
-        if selected_mode == OSRM_MODE_ID:
+        if gps_mode_supported:
             if isinstance(current_location, dict):
                 accuracy = current_location.get("accuracy_m")
                 accuracy_text = (
@@ -927,11 +990,18 @@ def main() -> None:
                 if current_location.get("location_stale"):
                     st.warning("最新定位要求失敗；目前保留並使用先前的位置，該位置可能已過期。")
                 if is_low_accuracy(accuracy):
-                    st.warning("目前定位精確度較低，路線起點可能與實際位置有明顯差距。")
-                if not is_near_nthu(
+                    if selected_mode == CAMPUS_MODE_ID:
+                        st.warning("目前定位精確度較低，已阻擋實驗性 campus snapping；請改用 OSRM 模式。")
+                    else:
+                        st.warning("目前定位精確度較低，路線起點可能與實際位置有明顯差距。")
+                near_nthu = is_near_nthu(
                     current_location.get("latitude"), current_location.get("longitude")
-                ):
-                    st.warning("目前位置距離清大校園較遠，OSRM 仍可嘗試規劃步行路線。")
+                )
+                if not near_nthu:
+                    if selected_mode == CAMPUS_MODE_ID:
+                        st.warning("目前位置距離清大校園較遠，已阻擋 campus snapping；請改用 OSRM 模式。")
+                    else:
+                        st.warning("目前位置距離清大校園較遠，OSRM 仍可嘗試規劃步行路線。")
             else:
                 st.info("請先按下「取得我的目前位置」，允許瀏覽器定位後再計算路線。")
             location_error = st.session_state.get("current_location_error")
@@ -952,23 +1022,40 @@ def main() -> None:
     if calculate_route:
         if same_place:
             st.warning("起點與終點相同，因此不計算路線。")
-        elif start_source == START_SOURCE_GPS and selected_mode != OSRM_MODE_ID:
-            st.warning("目前位置起點目前只支援 OSRM 路線模式。")
+        elif start_source == START_SOURCE_GPS and not gps_mode_supported:
+            if selected_mode == CAMPUS_MODE_ID:
+                st.warning("請先啟用實驗性 GPS 校園路線。")
+            else:
+                st.warning("目前位置起點不支援此路線模式，請改用 OSRM 模式。")
         elif start_source == START_SOURCE_GPS and not isinstance(current_location, dict):
             st.warning("尚未取得有效的目前位置，因此無法計算路線。")
         else:
             with st.spinner("正在計算路線..."):
                 if start_source == START_SOURCE_GPS:
-                    route_result = get_osrm_route_from_coordinates(
-                        places_df,
-                        current_location["latitude"],
-                        current_location["longitude"],
-                        end_id,
-                        allow_live_osrm=allow_live_osrm,
-                        route_cache_path=ROUTE_CACHE_PATH,
-                        osrm_profile=osrm_profile,
-                        ignore_osrm_cache=ignore_osrm_cache,
-                    )
+                    if selected_mode == CAMPUS_MODE_ID:
+                        route_result = get_gps_campus_route(
+                            places_df,
+                            edges_df,
+                            current_location["latitude"],
+                            current_location["longitude"],
+                            end_id,
+                            accuracy_m=current_location.get("accuracy_m"),
+                            allow_live_osrm=allow_live_osrm,
+                            route_cache_path=ROUTE_CACHE_PATH,
+                            osrm_profile=osrm_profile,
+                            ignore_osrm_cache=ignore_osrm_cache,
+                        )
+                    else:
+                        route_result = get_osrm_route_from_coordinates(
+                            places_df,
+                            current_location["latitude"],
+                            current_location["longitude"],
+                            end_id,
+                            allow_live_osrm=allow_live_osrm,
+                            route_cache_path=ROUTE_CACHE_PATH,
+                            osrm_profile=osrm_profile,
+                            ignore_osrm_cache=ignore_osrm_cache,
+                        )
                 else:
                     route_result = calculate_route_for_mode(
                         selected_mode,
@@ -1000,6 +1087,8 @@ def main() -> None:
 
             if route_result["success"]:
                 st.success("路線計算完成。")
+                if route_result.get("warning"):
+                    st.warning(route_result["warning"])
             elif "route_not_cached_demo_mode" in str(route_result["error"]):
                 st.warning(
                     "Demo mode 找不到這組 OSRM 路線快取。若現場網路可用，請勾選"
@@ -1007,6 +1096,8 @@ def main() -> None:
                 )
             elif "gps_live_osrm_required" in str(route_result["error"]):
                 st.warning("目前位置路線不會使用共享快取；請允許 live OSRM 後重新計算。")
+            elif route_result.get("suggested_mode") == OSRM_MODE_ID:
+                st.warning(f"{route_result['error']} 建議切換到 OSRM 路線模式。")
             else:
                 st.error(f"路線查詢失敗：{route_result['error']}")
 
@@ -1019,7 +1110,7 @@ def main() -> None:
         if start_source == START_SOURCE_GPS and isinstance(current_location, dict)
         else f"place:{start_id}"
     )
-    if route_matches_selection(
+    if (start_source != START_SOURCE_GPS or gps_mode_supported) and route_matches_selection(
         route_state,
         start_id,
         end_id,

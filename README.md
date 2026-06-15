@@ -437,7 +437,16 @@ Phase 1 僅在 `OSRM 路線` 模式支援目前位置起點。選擇「使用我
 - GPS 起點路線不讀取也不寫入 `data/route_cache.json`，因此必須允許 live OSRM request。
 - 若重新定位失敗，系統會保留先前有效位置並標示為可能過期。
 - 定位精確度超過 100 公尺或位置距離清大較遠時，畫面會顯示警告，但 OSRM 模式仍可由使用者決定是否計算。
-- 校園路線、雨天路線與比較模式目前不接受 GPS 起點；Phase 1 不包含 campus graph snapping。
+- 雨天路線與比較模式目前不接受 GPS 起點；校園模式僅能透過下方預設關閉的 Phase 2A 實驗功能使用 GPS。
+
+### 實驗性 GPS 校園路線（Phase 2A）
+
+校園路線模式提供一個預設關閉的實驗開關。啟用後，系統只會考慮能到達所選終點、具有有效座標且距離目前位置不超過 250 公尺的 graph node，再以不讀寫持久快取的 OSRM connector 連接到該節點，後續使用既有 campus graph 路線。
+
+- 定位精確度超過 100 公尺或位置不在清大附近時會阻擋 snapping，並建議改用 OSRM 模式。
+- GPS 校園路線不套用 forced-route rules，也不會自動成為預設路線模式。
+- connector 與 GPS 座標不會寫入 `route_cache.json`、CSV、日誌或其他共享檔案。
+- snapping、connector 或 campus graph 任一步失敗時，不會靜默改變路線來源，而會顯示原因並建議使用 OSRM。
 
 瀏覽器 Geolocation API 需要安全環境。Streamlit Community Cloud 的 HTTPS 可直接使用；本機請使用 `http://localhost:8501`，不要改用一般區網 HTTP IP 測試手機定位，除非另外配置 HTTPS。
 

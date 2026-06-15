@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,6 +11,7 @@ import networkx as nx
 import pandas as pd
 
 from .geo_utils import estimate_walking_duration_s, haversine_distance_m
+from .user_location import validate_coordinates
 from .utils import get_place_by_id, parse_coordinate, validate_places
 
 
@@ -37,6 +39,7 @@ EDGE_COLUMN_DEFAULTS = {
 ROAD_NODE_CATEGORIES = {"intersection", "road_node", "waypoint"}
 DESTINATION_LIKE_CATEGORIES = {"building", "gate", "landmark"}
 MAX_SHORT_CONNECTOR_M = 30.0
+DEFAULT_MAX_GPS_SNAP_DISTANCE_M = 250.0
 
 
 def load_edges(edges_csv: str | Path) -> pd.DataFrame:
@@ -253,6 +256,84 @@ def build_campus_graph(places_df: pd.DataFrame, edges_df: pd.DataFrame) -> nx.Di
 
     graph.graph["places_df"] = places_df.copy()
     return graph
+
+
+def find_nearest_reachable_node(
+    graph: nx.Graph,
+    latitude: Any,
+    longitude: Any,
+    destination_id: str,
+    *,
+    max_distance_m: float = DEFAULT_MAX_GPS_SNAP_DISTANCE_M,
+) -> dict[str, Any]:
+    """Find the nearest coordinate-bearing node that can reach the destination."""
+    try:
+        start_lat, start_lon = validate_coordinates(latitude, longitude)
+        max_distance = float(max_distance_m)
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "error": str(exc)}
+    if not math.isfinite(max_distance) or max_distance < 0:
+        return {"success": False, "error": "max_distance_m must be non-negative."}
+    if destination_id not in graph:
+        return {
+            "success": False,
+            "error": f"Destination node not found: {destination_id}",
+        }
+
+    try:
+        if graph.is_directed():
+            reachable_nodes = set(nx.ancestors(graph, destination_id))
+            reachable_nodes.add(destination_id)
+        else:
+            reachable_nodes = set(nx.node_connected_component(graph, destination_id))
+    except (nx.NetworkXError, nx.NodeNotFound) as exc:
+        return {"success": False, "error": str(exc)}
+
+    candidates: list[tuple[float, str, Any, float, float]] = []
+    for node_id in reachable_nodes:
+        node = graph.nodes[node_id]
+        try:
+            node_lat, node_lon = validate_coordinates(
+                node.get("latitude"),
+                node.get("longitude"),
+            )
+        except ValueError:
+            continue
+        distance_m = haversine_distance_m(
+            start_lat,
+            start_lon,
+            node_lat,
+            node_lon,
+        )
+        candidates.append((distance_m, str(node_id), node_id, node_lat, node_lon))
+
+    if not candidates:
+        return {
+            "success": False,
+            "error": "No reachable campus graph node has valid coordinates.",
+        }
+
+    distance_m, _tie_break_id, node_id, node_lat, node_lon = min(
+        candidates,
+        key=lambda candidate: (candidate[0], candidate[1]),
+    )
+    node = graph.nodes[node_id]
+    node_name = node.get("display_name") or node.get("name") or str(node_id)
+    result = {
+        "success": distance_m <= max_distance,
+        "node_id": node_id,
+        "node_name": str(node_name),
+        "latitude": node_lat,
+        "longitude": node_lon,
+        "distance_m": distance_m,
+        "error": None,
+    }
+    if not result["success"]:
+        result["error"] = (
+            f"Nearest reachable campus graph node is {distance_m:.0f} m away, "
+            f"exceeding the {max_distance:.0f} m snap limit."
+        )
+    return result
 
 
 def _failure(error: str, mode: str = "campus") -> dict[str, Any]:
